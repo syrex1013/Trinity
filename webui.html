@@ -91,38 +91,43 @@ input::placeholder{color:var(--mute)}
 
 /* tables */
 .tbl-wrap{overflow-x:auto;margin-top:8px}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
-td{padding:10px 12px;border-bottom:1px solid var(--hairline);color:var(--body);vertical-align:top}
+table{border-collapse:collapse;font-size:14px;table-layout:fixed;min-width:100%}
+th{position:relative;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap;user-select:none}
+th[data-k]{cursor:pointer}
+th[data-k]:hover{color:var(--body)}
+th .arr{margin-left:5px;color:var(--ink)}
+th .rs{position:absolute;top:0;right:0;bottom:0;width:9px;cursor:col-resize}
+th .rs:hover{background:rgba(247,245,240,.18)}
+td{padding:10px 12px;border-bottom:1px solid var(--hairline);color:var(--body);vertical-align:top;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 tr:hover td{background:rgba(247,245,240,.03)}
 td.mono{font-family:var(--mono);color:var(--ink)}
 td.id{font-family:var(--mono);color:var(--mute)}
-td .val{font-family:var(--mono);color:var(--ink);word-break:break-all;min-width:160px}
+td.val{font-family:var(--mono);color:var(--ink);cursor:copy}
+td.val .v{display:block;overflow:hidden;text-overflow:ellipsis}
+td.val.ok .v{color:var(--green)}
+td.pkg{cursor:pointer}
+td.pkg:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
 .chip{font-family:var(--mono);font-size:12px}
 .chip.working{color:var(--green)}
 .chip.broken{color:var(--red)}
 .chip.findings{color:var(--red)}
 .chip.clean{color:var(--green)}
-.chip.failed{color:var(--red)}
-.tbl-wrap{overflow-x:auto;margin-top:8px}
-.filters{display:flex;gap:8px;align-items:center;margin-top:0}
+.chip.failed,.chip.cleanup_failed{color:var(--red)}
+.chip.queued,.chip.downloading,.chip.downloaded,.chip.scanning,.chip.discovered{color:var(--yellow)}
+.pill{font-size:12px;color:var(--mute);padding:6px 12px;border:1px solid var(--hairline);border-radius:9999px}
+.pill:hover{color:var(--body)}
+.pill.on{color:var(--on-primary);background:var(--primary);border-color:var(--primary)}
+.empty{padding:24px;color:var(--mute);font-size:14px}
+.filters{display:flex;gap:8px;align-items:center}
 .filters .cnt{font-size:12px;color:var(--mute);margin-left:8px}
 .toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tools input[type=text]{width:220px}
 .sec-table td{padding:8px 10px}
 .sec-table th:first-child,.sec-table td.id{padding-left:0;padding-right:8px}
 .sec-table td:last-child,.sec-table th:last-child{padding-right:0}
-.sec-table td.val{font-family:var(--mono);color:var(--ink);white-space:nowrap}
-.sec-table td.val{max-width:110px}
-.sec-table td.val .v{display:block;overflow:hidden;text-overflow:ellipsis}
-.sec-table td.app,.sec-table td.file,.sec-table td.det{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
-.sec-table td.det{max-width:120px}
+.rowbtns{display:flex;gap:4px}
 .sec-table .rowbtns .btn{font-size:11px;padding:2px 6px}
-@media (max-width:720px){
-  .sec-table td.val{max-width:100px}
-  .sec-table td.app{max-width:100px}
-  .sec-table td.file{max-width:70px}
-  .sec-table td.det{max-width:100px}
-}
 
 @media (max-width:720px){
   .form-row{flex-direction:column;align-items:stretch}
@@ -206,10 +211,25 @@ td .val{font-family:var(--mono);color:var(--ink);word-break:break-all;min-width:
             <button class="pill" data-f="unmarked">Unmarked</button>
             <span class="cnt" id="secCount"></span>
           </div>
+          <div class="tools">
+            <input type="text" id="secSearch" placeholder="filter: value, detector, app…  ( / )">
+            <button class="btn ghost small" id="btnCopyJson" title="copy filtered secrets as JSON">Copy JSON</button>
+            <button class="btn ghost small" id="btnCsv" title="download filtered secrets as CSV">CSV</button>
+          </div>
         </div>
         <div class="tbl-wrap">
-          <table class="sec-table">
-            <thead><tr><th>#</th><th>detector</th><th>value</th><th>app</th><th>file</th><th>verified</th><th>working</th><th title="mark working / broken">✓/✕</th></tr></thead>
+          <table class="sec-table" id="secTable">
+            <colgroup><col><col><col><col><col><col><col><col></colgroup>
+            <thead><tr>
+              <th data-k="id">#</th>
+              <th data-k="detector">detector</th>
+              <th data-k="value" title="click a value to copy it">value</th>
+              <th data-k="package">app</th>
+              <th data-k="file">file</th>
+              <th data-k="verified">verified</th>
+              <th data-k="working">working</th>
+              <th title="mark working / broken">✓/✕</th>
+            </tr></thead>
             <tbody id="secBody"></tbody>
           </table>
         </div>
@@ -219,16 +239,27 @@ td .val{font-family:var(--mono);color:var(--ink);word-break:break-all;min-width:
     <section class="panel" id="p-apps">
       <div class="card">
         <div class="toolbar">
-          <span style="font-size:14px;font-weight:500">Scanned apps</span>
+          <div class="tools">
+            <span style="font-size:14px;font-weight:500">Scanned apps</span>
+            <input type="text" id="appSearch" placeholder="filter: package, source, status…">
+          </div>
           <button class="btn ghost" id="btnRetry">Retry failed</button>
         </div>
         <div class="tbl-wrap">
-          <table>
-            <thead><tr><th>#</th><th>source</th><th>package</th><th>version</th><th>status</th><th>secrets</th></tr></thead>
+          <table id="appTable">
+            <colgroup><col><col><col><col><col><col></colgroup>
+            <thead><tr>
+              <th data-k="id">#</th>
+              <th data-k="source">source</th>
+              <th data-k="package" title="click a package to see its secrets">package</th>
+              <th data-k="version">version</th>
+              <th data-k="status">status</th>
+              <th data-k="secrets">secrets</th>
+            </tr></thead>
             <tbody id="appBody"></tbody>
           </table>
         </div>
-        <div class="empty" id="appEmpty" hidden>No apps scanned yet.</div>
+        <div class="empty" id="appEmpty" hidden>No apps scanned yet. Click a package to jump to its secrets.</div>
       </div>
     </section>
   </main>
@@ -273,13 +304,14 @@ function rich(s){
 }
 
 /* tabs */
-$$(".tab").forEach(b => b.addEventListener("click", () => {
-  $$(".tab").forEach(x => x.classList.toggle("on", x === b));
-  activeTab = b.dataset.tab;
-  $$(".panel").forEach(p => p.classList.toggle("on", p.id === "p-" + activeTab));
-  if (activeTab === "secrets") loadSecrets();
-  if (activeTab === "apps") loadApps();
-}));
+function setTab(name){
+  activeTab = name;
+  $$(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === name));
+  $$(".panel").forEach(p => p.classList.toggle("on", p.id === "p-" + name));
+  if (name === "secrets") loadSecrets();
+  if (name === "apps") loadApps();
+}
+$$(".tab").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
 
 /* state + stats */
 async function pollState(){
@@ -317,9 +349,11 @@ async function pollLogs(){
     if (stick) term.scrollTop = term.scrollHeight;
   }catch(e){}
 }
-
 /* secrets */
 let secretsCache = [];
+let secSort = { k: "id", dir: 1 };
+const secSearch = $("#secSearch");
+
 async function loadSecrets(){
   try{
     const r = await api("/api/secrets");
@@ -327,58 +361,196 @@ async function loadSecrets(){
     renderSecrets();
   }catch(e){}
 }
+function sortRows(rows, sort){
+  if (!sort.k) return rows;
+  return rows.slice().sort((a, b) => {
+    let x = a[sort.k], y = b[sort.k];
+    if (sort.k === "working"){ x = x ?? -1; y = y ?? -1; }
+    const c = (typeof x === "number" && typeof y === "number") ? x - y : String(x ?? "").localeCompare(String(y ?? ""));
+    return c * sort.dir || a.id - b.id;
+  });
+}
+function filteredSecrets(){
+  const q = secSearch.value.trim().toLowerCase();
+  return sortRows(secretsCache.filter(s =>
+    (secFilter === "all" ? true :
+     secFilter === "unmarked" ? s.working === null :
+     secFilter === "working" ? s.working === 1 : s.working === 0) &&
+    (!q || [s.value, s.detector, s.package, s.file].some(v => (v || "").toLowerCase().includes(q)))
+  ), secSort);
+}
+function renderSortHeads(table, sort){
+  table.querySelectorAll("th[data-k]").forEach(th => {
+    th.querySelector(".arr")?.remove();
+    if (th.dataset.k === sort.k){
+      const a = document.createElement("span");
+      a.className = "arr";
+      a.textContent = sort.dir > 0 ? "↑" : "↓";
+      th.appendChild(a);
+    }
+  });
+}
 function renderSecrets(){
-  const rows = secretsCache.filter(s =>
-    secFilter === "all" ? true :
-    secFilter === "unmarked" ? s.working === null :
-    secFilter === "working" ? s.working === 1 : s.working === 0
-  );
+  const rows = filteredSecrets();
   $("#secCount").textContent = rows.length + " of " + secretsCache.length;
   $("#secEmpty").hidden = rows.length > 0;
+  renderSortHeads($("#secTable"), secSort);
   $("#secBody").innerHTML = rows.map(s => {
     const chip = s.working === 1 ? '<span class="chip working">working</span>' :
                  s.working === 0 ? '<span class="chip broken">broken</span>' : '<span style="color:var(--mute)">-</span>';
-    return "<tr>" +
+    return '<tr data-sid="' + s.id + '">' +
       '<td class="id">#' + s.id + "</td>" +
       '<td class="det" title="' + esc(s.detector) + '"><b>' + esc(s.detector) + "</b></td>" +
-      '<td class="val"><span class="v" title="' + esc(s.value) + '">' + esc(s.value) + "</span></td>" +
+      '<td class="val" title="' + esc(s.value) + ' — click to copy"><span class="v">' + esc(s.value) + "</span></td>" +
       '<td class="mono app" title="' + esc(s.package || "") + '">' + esc(s.package || "-") + "</td>" +
       '<td class="mono file" title="' + esc(s.file) + '">' + esc(s.file) + "</td>" +
       "<td>" + (s.verified ? "yes" : "no") + "</td>" +
       "<td>" + chip + "</td>" +
       '<td><div class="rowbtns">' +
-        '<button class="btn ghost small" onclick="mark(' + s.id + ',\'working\')">✓</button>' +
-        '<button class="btn danger small" onclick="mark(' + s.id + ',\'broken\')">✕</button>' +
+        '<button class="btn ghost small" data-mark="working" title="mark working">✓</button>' +
+        '<button class="btn danger small" data-mark="broken" title="mark broken">✕</button>' +
+        '<button class="btn ghost small" data-copy="1" title="copy value">⧉</button>' +
       "</div></td></tr>";
   }).join("");
 }
+$("#secTable").querySelectorAll("th[data-k]").forEach(th => th.addEventListener("click", () => {
+  const k = th.dataset.k;
+  if (secSort.k === k) secSort.dir *= -1; else secSort = { k, dir: 1 };
+  renderSecrets();
+}));
+secSearch.addEventListener("input", renderSecrets);
 $$(".pill").forEach(p => p.addEventListener("click", () => {
   $$(".pill").forEach(x => x.classList.toggle("on", x === p));
   secFilter = p.dataset.f;
   renderSecrets();
 }));
-async function mark(id, verdict){
-  try{ await api("/api/mark", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({id, verdict})}); }catch(e){}
-  loadSecrets();
+async function copyText(text){
+  try{ await navigator.clipboard.writeText(text); return true; }
+  catch(e){
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  }
 }
+$("#secBody").addEventListener("click", async e => {
+  const tr = e.target.closest("tr");
+  if (!tr) return;
+  const s = secretsCache.find(x => x.id === +tr.dataset.sid);
+  if (!s) return;
+  const btn = e.target.closest("button");
+  if (btn && btn.dataset.mark){
+    try{ await api("/api/mark", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({id: s.id, verdict: btn.dataset.mark})}); }catch(err){}
+    loadSecrets();
+    return;
+  }
+  if (btn && btn.dataset.copy){
+    if (await copyText(s.value)){ btn.textContent = "✓"; setTimeout(() => btn.textContent = "⧉", 900); }
+    return;
+  }
+  const td = e.target.closest("td.val");
+  if (td && await copyText(s.value)){
+    td.classList.add("ok");
+    setTimeout(() => td.classList.remove("ok"), 900);
+  }
+});
+
+/* export */
+function csvCell(v){ v = String(v ?? ""); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+$("#btnCsv").addEventListener("click", () => {
+  const rows = filteredSecrets();
+  const lines = ["id,detector,value,app,file,verified,working"];
+  for (const r of rows) lines.push([r.id, r.detector, r.value, r.package || "", r.file, r.verified ? "yes" : "no",
+    r.working === null ? "" : r.working ? "working" : "broken"].map(csvCell).join(","));
+  const url = URL.createObjectURL(new Blob([lines.join("\n")], {type: "text/csv"}));
+  const a = document.createElement("a");
+  a.href = url; a.download = "secrets.csv"; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+});
+$("#btnCopyJson").addEventListener("click", async e => {
+  if (await copyText(JSON.stringify(filteredSecrets(), null, 2))){
+    e.currentTarget.textContent = "Copied!";
+    setTimeout(() => e.currentTarget.textContent = "Copy JSON", 900);
+  }
+});
 
 /* apps */
+let appsCache = [];
+let appSort = { k: "id", dir: 1 };
+const appSearch = $("#appSearch");
 async function loadApps(){
   try{
     const r = await api("/api/apps");
-    $("#appEmpty").hidden = r.apps.length > 0;
-    $("#appBody").innerHTML = r.apps.map(a =>
-      "<tr>" +
+    appsCache = r.apps;
+    renderApps();
+  }catch(e){}
+}
+function renderApps(){
+  const q = appSearch.value.trim().toLowerCase();
+  const rows = sortRows(appsCache.filter(a =>
+    !q || [a.package, a.source, a.status, a.version].some(v => (v || "").toLowerCase().includes(q))
+  ), appSort);
+  $("#appEmpty").hidden = rows.length > 0;
+  renderSortHeads($("#appTable"), appSort);
+  $("#appBody").innerHTML = rows.map(a =>
+    '<tr data-aid="' + a.id + '">' +
       '<td class="id">#' + a.id + "</td>" +
       "<td>" + esc(a.source) + "</td>" +
-      '<td class="mono">' + esc(a.package || "-") + "</td>" +
+      '<td class="mono pkg" title="show secrets for this app">' + esc(a.package || "-") + "</td>" +
       '<td class="mono">' + esc(a.version || "-") + "</td>" +
       '<td><span class="chip ' + esc(a.status) + '">' + esc(a.status) + "</span></td>" +
       '<td class="mono">' + a.secrets + "</td></tr>"
-    ).join("");
-  }catch(e){}
+  ).join("");
 }
+$("#appTable").querySelectorAll("th[data-k]").forEach(th => th.addEventListener("click", () => {
+  const k = th.dataset.k;
+  if (appSort.k === k) appSort.dir *= -1; else appSort = { k, dir: 1 };
+  renderApps();
+}));
+appSearch.addEventListener("input", renderApps);
+$("#appBody").addEventListener("click", e => {
+  const td = e.target.closest("td.pkg");
+  if (!td) return;
+  const a = appsCache.find(x => x.id === +td.closest("tr").dataset.aid);
+  if (!a) return;
+  secSearch.value = a.package || "";
+  secFilter = "all";
+  $$(".pill").forEach(x => x.classList.toggle("on", x.dataset.f === "all"));
+  setTab("secrets");
+});
 
+/* resizable columns (persisted per table) */
+const COL_DEFAULTS = { secTable: [48, 150, 280, 220, 230, 84, 100, 96], appTable: [48, 110, 340, 120, 130, 96] };
+function initResizable(table){
+  const cols = table.querySelectorAll("col");
+  const defaults = COL_DEFAULTS[table.id];
+  let widths;
+  try{ widths = JSON.parse(localStorage.getItem("colw." + table.id)); }catch(e){}
+  if (!Array.isArray(widths) || widths.length !== cols.length) widths = defaults.slice();
+  const apply = () => cols.forEach((c, i) => c.style.width = widths[i] + "px");
+  const save = () => { try{ localStorage.setItem("colw." + table.id, JSON.stringify(widths)); }catch(e){} };
+  apply();
+  table.querySelectorAll("th").forEach((th, i) => {
+    const rs = document.createElement("span");
+    rs.className = "rs";
+    rs.title = "drag to resize · double-click to reset";
+    rs.addEventListener("click", e => e.stopPropagation());
+    rs.addEventListener("dblclick", e => { e.stopPropagation(); widths[i] = defaults[i]; save(); apply(); });
+    rs.addEventListener("pointerdown", e => {
+      e.preventDefault(); e.stopPropagation();
+      const x0 = e.clientX, w0 = widths[i];
+      const move = ev => { widths[i] = Math.max(40, w0 + ev.clientX - x0); apply(); };
+      const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); save(); };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    });
+    th.appendChild(rs);
+  });
+}
+initResizable($("#secTable"));
+initResizable($("#appTable"));
 /* actions */
 $("#btnStart").addEventListener("click", async () => {
   const sources = [];
@@ -403,7 +575,12 @@ $("#btnStop").addEventListener("click", () => {
   api("/api/scan/stop", {method:"POST"}).then(pollState).catch(()=>{});
 });
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape"){ api("/api/scan/stop", {method:"POST"}).then(pollState).catch(()=>{}); }
+  if (e.key === "Escape"){ api("/api/scan/stop", {method:"POST"}).then(pollState).catch(()=>{}); return; }
+  if (e.key === "/" && document.activeElement !== secSearch && document.activeElement !== appSearch
+      && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")){
+    e.preventDefault();
+    setTab("secrets"); secSearch.focus(); secSearch.select();
+  }
 });
 $("#btnImport").addEventListener("click", async () => {
   const path = $("#importPath").value.trim();

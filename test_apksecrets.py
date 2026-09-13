@@ -35,6 +35,25 @@ class ApkSecretsTests(unittest.TestCase):
         matches = [r for r in releases if any(k in r[0].lower() or k in r[3] for k in ["signal"])]
         self.assertEqual([r[0] for r in matches], ["org.molly"])
 
+    def test_fdroid_repeats_do_not_requeue_known_urls(self):
+        data = {"packages": {"x": [{"versionCode": 1, "apkName": "x-1.apk"}],
+                             "y": [{"versionCode": 1, "apkName": "y-1.apk"}]}}
+        with tempfile.TemporaryDirectory() as d:
+            store = apksecrets.Store(Path(d) / "state")
+            try:
+                args = types.SimpleNamespace(source=["fdroid"], package=[], keyword=[],
+                                             latest_artifact_limit=0, random=False)
+                class FakeFetcher:
+                    def get(self, url): return json.dumps(data).encode()
+                apksecrets.discover(store, FakeFetcher(), args)
+                self.assertEqual(len(store.jobs()), 2)
+                apksecrets.discover(store, FakeFetcher(), args)
+                self.assertEqual(len(store.jobs()), 2)
+                data["packages"]["z"] = [{"versionCode": 1, "apkName": "z-1.apk"}]
+                apksecrets.discover(store, FakeFetcher(), args)
+                self.assertEqual(len(store.jobs()), 3)
+            finally: store.close()
+
     def test_aptoide_queues_every_matching_release(self):
         data = {"datalist": {"list": [
             {"package": "app.one", "vername": "2.0", "file": {"path": "https://x/app.one-2.apk"}},
