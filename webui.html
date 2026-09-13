@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APK Secret Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --canvas:#2b2622; --canvas-soft:#383330; --hairline:#3f3a36;
+  --ink:#f7f5f0; --body:#c9c0ad; --mute:#aea69c;
+  --primary:#f7f5f0; --on-primary:#2b2622;
+  --red:#e07a5f; --green:#9cbb7f; --yellow:#d9b36c; --cyan:#86b7a8;
+  --r-btn:3px; --r-card:4px;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--canvas);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+button{font:inherit;cursor:pointer;background:none;border:none;color:inherit}
+button:focus-visible,input:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+a{color:var(--ink)}
+
+/* header */
+header{position:sticky;top:0;z-index:10;background:var(--canvas);border-bottom:1px solid var(--hairline)}
+.hd{height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{display:flex;align-items:baseline;gap:10px}
+.brand b{font-size:15px;font-weight:500;letter-spacing:-0.2px}
+.brand span{font-size:12px;color:var(--mute)}
+.status{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--body)}
+.dot{width:7px;height:7px;border-radius:9999px;background:var(--mute);flex:none}
+.dot.on{background:var(--green);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+/* tabs */
+nav{display:flex;gap:4px;height:44px;align-items:stretch}
+.tab{font-size:14px;font-weight:500;color:var(--mute);padding:0 12px;box-shadow:inset 0 -2px 0 transparent;transition:color .15s}
+.tab:hover{color:var(--body)}
+.tab.on{color:var(--ink);box-shadow:inset 0 -2px 0 var(--primary)}
+main{padding-bottom:96px}
+.panel{display:none}
+.panel.on{display:block}
+
+/* cards */
+.card{background:var(--canvas-soft);border:1px solid var(--hairline);border-radius:var(--r-card);padding:24px;margin-top:24px}
+
+/* form */
+.form-row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end}
+.form-row + .form-row{margin-top:16px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:12px;color:var(--mute)}
+.field.grow{flex:1;min-width:220px}
+input[type=text],input[type=number]{background:var(--canvas);border:1px solid var(--hairline);border-radius:var(--r-btn);color:var(--ink);font-size:14px;padding:8px 10px;font-family:inherit}
+input[type=number]{width:92px}
+input::placeholder{color:var(--mute)}
+.checks{display:flex;gap:16px}
+.check{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--body);height:36px}
+.check input{accent-color:var(--primary);width:14px;height:14px}
+.btn{background:var(--primary);color:var(--on-primary);font-size:14px;font-weight:500;padding:8px 16px;border-radius:var(--r-btn);transition:background .15s,transform .05s}
+.btn:hover{background:#fffdf8}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--hairline)}
+.btn.ghost:hover{background:rgba(247,245,240,.05)}
+.btn.small{font-size:12px;padding:4px 10px}
+.btn.danger{background:transparent;color:var(--red);border:1px solid var(--hairline)}
+.btn.danger:hover{background:rgba(224,122,95,.08)}
+
+/* stats */
+.stats{display:flex;flex-wrap:wrap;margin-top:24px;border:1px solid var(--hairline);border-radius:var(--r-card);background:var(--canvas-soft);padding:20px 24px;gap:0 0}
+.stat{padding:0 28px;border-right:1px solid var(--hairline)}
+.stat:first-child{padding-left:0}
+.stat:last-child{border-right:none}
+.stat .n{font-family:var(--mono);font-size:24px;line-height:1.2}
+.stat .l{font-size:12px;color:var(--mute);margin-top:4px}
+.stat.findings .n{color:var(--red)}
+.stat.clean .n{color:var(--green)}
+.stat.failed .n{color:var(--red)}
+
+/* terminal */
+.term{padding:0;overflow:hidden}
+.term-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--hairline)}
+.term-hd span{font-size:12px;color:var(--mute)}
+.term-body{font-family:var(--mono);font-size:13px;line-height:1.5;height:420px;overflow-y:auto;padding:16px;white-space:pre-wrap;word-break:break-word}
+.ln{animation:fadein .2s ease}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+.ts{color:var(--mute);margin-right:12px}
+
+/* tables */
+.tbl-wrap{overflow-x:auto;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--hairline);color:var(--body);vertical-align:top}
+tr:hover td{background:rgba(247,245,240,.03)}
+td.mono{font-family:var(--mono);color:var(--ink)}
+td.id{font-family:var(--mono);color:var(--mute)}
+td .val{font-family:var(--mono);color:var(--ink);word-break:break-all;min-width:160px}
+.chip{font-family:var(--mono);font-size:12px}
+.chip.working{color:var(--green)}
+.chip.broken{color:var(--red)}
+.chip.findings{color:var(--red)}
+.chip.clean{color:var(--green)}
+.chip.failed{color:var(--red)}
+.tbl-wrap{overflow-x:auto;margin-top:8px}
+.filters{display:flex;gap:8px;align-items:center;margin-top:0}
+.filters .cnt{font-size:12px;color:var(--mute);margin-left:8px}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.sec-table td{padding:8px 10px}
+.sec-table th:first-child,.sec-table td.id{padding-left:0;padding-right:8px}
+.sec-table td:last-child,.sec-table th:last-child{padding-right:0}
+.sec-table td.val{font-family:var(--mono);color:var(--ink);white-space:nowrap}
+.sec-table td.val{max-width:110px}
+.sec-table td.val .v{display:block;overflow:hidden;text-overflow:ellipsis}
+.sec-table td.app,.sec-table td.file,.sec-table td.det{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.sec-table td.det{max-width:120px}
+.sec-table .rowbtns .btn{font-size:11px;padding:2px 6px}
+@media (max-width:720px){
+  .sec-table td.val{max-width:100px}
+  .sec-table td.app{max-width:100px}
+  .sec-table td.file{max-width:70px}
+  .sec-table td.det{max-width:100px}
+}
+
+@media (max-width:720px){
+  .form-row{flex-direction:column;align-items:stretch}
+  input[type=number]{width:100%}
+  .stats{gap:16px 0}
+  .stat{padding:0 16px}
+  .stat:nth-child(3n){border-right:none}
+  .term-body{height:300px}
+  .brand span{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap hd">
+    <div class="brand"><b>apksecrets</b><span>discover, download, unpack, scan, retain</span></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">idle</span></div>
+  </div>
+</header>
+<div class="wrap">
+  <nav>
+    <button class="tab on" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="secrets">Secrets</button>
+    <button class="tab" data-tab="apps">Apps</button>
+  </nav>
+  <main>
+    <section class="panel on" id="p-overview">
+      <div class="card">
+        <div class="form-row">
+          <div class="field">
+            <label>Sources</label>
+            <div class="checks">
+              <label class="check"><input type="checkbox" id="srcFdroid" checked> fdroid</label>
+              <label class="check"><input type="checkbox" id="srcAptoide"> aptoide</label>
+              <label class="check"><input type="checkbox" id="srcApkmirror"> apkmirror</label>
+              <label class="check"><input type="checkbox" id="srcLocal"> local</label>
+            </div>
+          </div>
+          <div class="field grow">
+            <label for="keywords">Keywords (comma separated)</label>
+            <input type="text" id="keywords" placeholder="whatsapp, signal, telegram">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>Options</label>
+            <div class="checks">
+              <label class="check"><input type="checkbox" id="optRandom"> random</label>
+              <label class="check"><input type="checkbox" id="optForever"> forever</label>
+            </div>
+          </div>
+          <div class="field"><label for="optInterval">Interval (s)</label><input type="number" id="optInterval" value="30" min="0"></div>
+          <div class="field"><label for="optWorkers">Workers</label><input type="number" id="optWorkers" value="4" min="1"></div>
+          <div class="field"><label for="optLimit">Limit</label><input type="number" id="optLimit" value="0" min="0"></div>
+          <div class="field"><label>&nbsp;</label><button class="btn danger" id="btnStop" hidden>Stop scan</button><button class="btn" id="btnStart">Start scan</button></div>
+        </div>
+        <div class="form-row">
+          <div class="field grow">
+            <label for="importPath">Import local APK path</label>
+            <input type="text" id="importPath" placeholder="/path/to/app.apk or folder">
+          </div>
+          <div class="field"><label>&nbsp;</label><button class="btn ghost" id="btnImport">Import</button></div>
+        </div>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div class="card term">
+        <div class="term-hd"><span>live output</span><button class="btn ghost small" id="btnClear">Clear</button></div>
+        <div class="term-body" id="term"></div>
+      </div>
+    </section>
+    <section class="panel" id="p-secrets">
+      <div class="card">
+        <div class="toolbar">
+          <div class="filters">
+            <button class="pill on" data-f="all">All</button>
+            <button class="pill" data-f="working">Working</button>
+            <button class="pill" data-f="broken">Broken</button>
+            <button class="pill" data-f="unmarked">Unmarked</button>
+            <span class="cnt" id="secCount"></span>
+          </div>
+        </div>
+        <div class="tbl-wrap">
+          <table class="sec-table">
+            <thead><tr><th>#</th><th>detector</th><th>value</th><th>app</th><th>file</th><th>verified</th><th>working</th><th title="mark working / broken">✓/✕</th></tr></thead>
+            <tbody id="secBody"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="secEmpty" hidden>No secrets yet. Start a scan to collect findings.</div>
+      </div>
+    </section>
+    <section class="panel" id="p-apps">
+      <div class="card">
+        <div class="toolbar">
+          <span style="font-size:14px;font-weight:500">Scanned apps</span>
+          <button class="btn ghost" id="btnRetry">Retry failed</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>#</th><th>source</th><th>package</th><th>version</th><th>status</th><th>secrets</th></tr></thead>
+            <tbody id="appBody"></tbody>
+          </table>
+        </div>
+        <div class="empty" id="appEmpty" hidden>No apps scanned yet.</div>
+      </div>
+    </section>
+  </main>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+let logSeq = 0, activeTab = "overview", secFilter = "all";
+
+async function api(path, opts){
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.status);
+  return data;
+}
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* rich markup to html */
+const COLORS = {red:"#e07a5f", green:"#9cbb7f", yellow:"#d9b36c", cyan:"#86b7a8", dim:"#aea69c"};
+function styleSpan(tag){
+  const css = [];
+  for (const p of tag.split(" ")){
+    if (p === "bold") css.push("font-weight:600");
+    else if (COLORS[p]) css.push("color:" + COLORS[p]);
+  }
+  return '<span style="' + css.join(";") + '">';
+}
+function rich(s){
+  s = s.replace(/\\\[\*\]/g, "[*]");
+  let out = ""; const open = [];
+  for (const t of s.split(/(\[[^\]]*\])/)){
+    if (!t) continue;
+    const m = t.match(/^\[(\/?)([a-z #]*)\]$/i);
+    if (!m){ out += esc(t); continue; }
+    if (m[1] === "/"){
+      if (!m[2]){ if (open.length){ open.pop(); out += "</span>"; } }
+      else { for (let i = open.length - 1; i >= 0; i--){ if (open[i] === m[2]){ out += "</span>".repeat(open.length - i); open.length = i; break; } } }
+    } else if (m[2]){ open.push(m[2]); out += styleSpan(m[2]); }
+  }
+  while (open.length){ open.pop(); out += "</span>"; }
+  return out;
+}
+
+/* tabs */
+$$(".tab").forEach(b => b.addEventListener("click", () => {
+  $$(".tab").forEach(x => x.classList.toggle("on", x === b));
+  activeTab = b.dataset.tab;
+  $$(".panel").forEach(p => p.classList.toggle("on", p.id === "p-" + activeTab));
+  if (activeTab === "secrets") loadSecrets();
+  if (activeTab === "apps") loadApps();
+}));
+
+/* state + stats */
+async function pollState(){
+  try{
+    const s = await api("/api/state");
+    $("#dot").classList.toggle("on", s.running);
+    $("#statusText").textContent = s.stopping ? "stopping" : (s.running ? "scanning" : "idle");
+    $("#btnStart").disabled = s.running;
+    $("#btnStart").hidden = s.running;
+    $("#btnStop").hidden = !s.running;
+    const order = ["findings","clean","failed","queued","downloading","scanning"];
+    $("#stats").innerHTML = order.map(k =>
+      '<div class="stat ' + k + '"><div class="n">' + (s.counts[k] || 0) + '</div><div class="l">' + k + '</div></div>'
+    ).join("");
+  }catch(e){ $("#statusText").textContent = "offline"; }
+}
+
+/* logs */
+async function pollLogs(){
+  try{
+    const r = await api("/api/logs?after=" + logSeq);
+    if (!r.logs.length) return;
+    const term = $("#term");
+    const stick = term.scrollHeight - term.scrollTop - term.clientHeight < 48;
+    const empty = term.querySelector(".empty");
+    if (empty) empty.remove();
+    for (const e of r.logs){
+      logSeq = e.seq;
+      const div = document.createElement("div");
+      div.className = "ln";
+      div.innerHTML = '<span class="ts">' + esc(e.time) + "</span>" + rich(e.text);
+      term.appendChild(div);
+    }
+    while (term.children.length > 600) term.removeChild(term.firstChild);
+    if (stick) term.scrollTop = term.scrollHeight;
+  }catch(e){}
+}
+
+/* secrets */
+let secretsCache = [];
+async function loadSecrets(){
+  try{
+    const r = await api("/api/secrets");
+    secretsCache = r.secrets;
+    renderSecrets();
+  }catch(e){}
+}
+function renderSecrets(){
+  const rows = secretsCache.filter(s =>
+    secFilter === "all" ? true :
+    secFilter === "unmarked" ? s.working === null :
+    secFilter === "working" ? s.working === 1 : s.working === 0
+  );
+  $("#secCount").textContent = rows.length + " of " + secretsCache.length;
+  $("#secEmpty").hidden = rows.length > 0;
+  $("#secBody").innerHTML = rows.map(s => {
+    const chip = s.working === 1 ? '<span class="chip working">working</span>' :
+                 s.working === 0 ? '<span class="chip broken">broken</span>' : '<span style="color:var(--mute)">-</span>';
+    return "<tr>" +
+      '<td class="id">#' + s.id + "</td>" +
+      '<td class="det" title="' + esc(s.detector) + '"><b>' + esc(s.detector) + "</b></td>" +
+      '<td class="val"><span class="v" title="' + esc(s.value) + '">' + esc(s.value) + "</span></td>" +
+      '<td class="mono app" title="' + esc(s.package || "") + '">' + esc(s.package || "-") + "</td>" +
+      '<td class="mono file" title="' + esc(s.file) + '">' + esc(s.file) + "</td>" +
+      "<td>" + (s.verified ? "yes" : "no") + "</td>" +
+      "<td>" + chip + "</td>" +
+      '<td><div class="rowbtns">' +
+        '<button class="btn ghost small" onclick="mark(' + s.id + ',\'working\')">✓</button>' +
+        '<button class="btn danger small" onclick="mark(' + s.id + ',\'broken\')">✕</button>' +
+      "</div></td></tr>";
+  }).join("");
+}
+$$(".pill").forEach(p => p.addEventListener("click", () => {
+  $$(".pill").forEach(x => x.classList.toggle("on", x === p));
+  secFilter = p.dataset.f;
+  renderSecrets();
+}));
+async function mark(id, verdict){
+  try{ await api("/api/mark", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({id, verdict})}); }catch(e){}
+  loadSecrets();
+}
+
+/* apps */
+async function loadApps(){
+  try{
+    const r = await api("/api/apps");
+    $("#appEmpty").hidden = r.apps.length > 0;
+    $("#appBody").innerHTML = r.apps.map(a =>
+      "<tr>" +
+      '<td class="id">#' + a.id + "</td>" +
+      "<td>" + esc(a.source) + "</td>" +
+      '<td class="mono">' + esc(a.package || "-") + "</td>" +
+      '<td class="mono">' + esc(a.version || "-") + "</td>" +
+      '<td><span class="chip ' + esc(a.status) + '">' + esc(a.status) + "</span></td>" +
+      '<td class="mono">' + a.secrets + "</td></tr>"
+    ).join("");
+  }catch(e){}
+}
+
+/* actions */
+$("#btnStart").addEventListener("click", async () => {
+  const sources = [];
+  if ($("#srcFdroid").checked) sources.push("fdroid");
+  if ($("#srcAptoide").checked) sources.push("aptoide");
+  if ($("#srcApkmirror").checked) sources.push("apkmirror");
+  if ($("#srcLocal").checked) sources.push("local");
+  try{
+    await api("/api/scan/start", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
+      sources: sources.length ? sources : ["fdroid"],
+      keywords: $("#keywords").value,
+      random: $("#optRandom").checked,
+      forever: $("#optForever").checked,
+      interval: $("#optInterval").value,
+      workers: $("#optWorkers").value,
+      limit: $("#optLimit").value
+    })});
+    pollState();
+  }catch(e){ alert(e.message); }
+});
+$("#btnStop").addEventListener("click", () => {
+  api("/api/scan/stop", {method:"POST"}).then(pollState).catch(()=>{});
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape"){ api("/api/scan/stop", {method:"POST"}).then(pollState).catch(()=>{}); }
+});
+$("#btnImport").addEventListener("click", async () => {
+  const path = $("#importPath").value.trim();
+  if (!path) return;
+  try{ await api("/api/import", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({path})}); pollLogs(); }
+  catch(e){ alert(e.message); }
+});
+$("#btnRetry").addEventListener("click", async () => {
+  try{ await api("/api/retry-failed", {method:"POST"}); loadApps(); }catch(e){}
+});
+$("#btnClear").addEventListener("click", () => { $("#term").innerHTML = ""; });
+
+/* polling */
+pollState(); pollLogs(); loadSecrets(); loadApps();
+setInterval(pollState, 2000);
+setInterval(pollLogs, 1200);
+setInterval(() => { if (activeTab === "secrets") loadSecrets(); if (activeTab === "apps") loadApps(); }, 5000);
+</script>
+</body>
+</html>

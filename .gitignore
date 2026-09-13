@@ -1,0 +1,19 @@
+# scanner state, downloaded APKs, reports
+.apksecrets/
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# local harness
+.pi/
+.pi-loop.json.lock
