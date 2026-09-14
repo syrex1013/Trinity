@@ -8,7 +8,7 @@ Checkpointed, local-only secret scanner for APK and split APK archives. Discover
 discover → download → unpack → scan → retain
 ```
 
-Every job is checkpointed in `state.sqlite3` (`--state` directory, default `.apksecrets/`). Interrupted scans resume; failed jobs retry and can be re-queued. Clean APKs are deleted after scanning; apps with findings keep their artifact so re-scans never re-download.
+Every job is checkpointed in `state.sqlite3` (`--state` directory, default `.apksecrets/`). Interrupted scans resume; failed jobs retry and can be re-queued. APKs are deleted after scanning — secrets and the scan report are retained in SQLite, so nothing is re-scanned or re-downloaded and disk usage stays minimal.
 
 ## Install
 
