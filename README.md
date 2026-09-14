@@ -58,7 +58,8 @@ brew install trufflehog        # or download from trufflehog releases
 ## Web UI
 
 - Overview: start/stop scans, live stats and terminal output (Escape stops too)
-- Secrets: filter all/working/broken/unmarked with live counts, free-text search (`/` focuses it), sort by any column, click a value (or ⧉) to copy it, detector names link to where the secret is used, export filtered rows as CSV or JSON; an auto-verifier marks supported secret types (Slack, Telegram, Discord, GitHub, OpenAI, …) working/broken as they appear
+- Secrets: filter all/working/broken/unmarked with live counts, free-text search (`/` focuses it), sort by any column, click a value (or ⧉) to copy it, detector names link to where the secret is used, export filtered rows as CSV or JSON
+- Verify: dedicated log panel for the auto-verifier, which probes ~30 secret types (Slack, Telegram, Discord, GitHub, GitLab, Stripe, OpenAI, Anthropic, Heroku, Dropbox, Mailgun, Mailchimp, Postmark, Figma, Asana, PagerDuty, Linear, New Relic, Spotify, Calendly, Datadog, …) against their provider APIs and marks them working/broken automatically
 - Apps: searchable, sortable table; click a package to jump to its secrets; retry failed
 - Both tables fit their card and have drag-resizable columns (double-click a column edge to reset; widths persist in the browser)
 

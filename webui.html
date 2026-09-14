@@ -85,8 +85,8 @@ input::placeholder{color:var(--mute)}
 .term-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--hairline)}
 .term-hd span{font-size:12px;color:var(--mute)}
 .term-body{font-family:var(--mono);font-size:13px;line-height:1.5;height:420px;overflow-y:auto;padding:16px;white-space:pre-wrap;word-break:break-word}
+.term-body.v{height:280px}
 .ln{animation:fadein .2s ease}
-@keyframes fadein{from{opacity:0}to{opacity:1}}
 .ts{color:var(--mute);margin-right:12px}
 
 /* tables */
@@ -134,9 +134,9 @@ td.pkg:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3p
   .form-row{flex-direction:column;align-items:stretch}
   input[type=number]{width:100%}
   .stats{gap:16px 0}
-  .stat{padding:0 16px}
-  .stat:nth-child(3n){border-right:none}
   .term-body{height:300px}
+  .term-body.v{height:240px}
+  .stat:nth-child(3n){border-right:none}
   .brand span{display:none}
 }
 @media (prefers-reduced-motion:reduce){
@@ -156,6 +156,7 @@ td.pkg:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3p
     <button class="tab on" data-tab="overview">Overview</button>
     <button class="tab" data-tab="secrets">Secrets</button>
     <button class="tab" data-tab="apps">Apps</button>
+    <button class="tab" data-tab="verify">Verify</button>
   </nav>
   <main>
     <section class="panel on" id="p-overview">
@@ -263,6 +264,17 @@ td.pkg:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3p
         <div class="empty" id="appEmpty" hidden>No apps scanned yet. Click a package to jump to its secrets.</div>
       </div>
     </section>
+    <section class="panel" id="p-verify">
+      <div class="card">
+        <div class="toolbar">
+          <span style="font-size:14px;font-weight:500">Auto-verifier log</span>
+          <span style="font-size:12px;color:var(--mute)">probes each secret against its provider; working/broken marked automatically</span>
+        </div>
+        <div class="term">
+          <div class="term-body v" id="termVerify"></div>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 <script>
@@ -359,24 +371,30 @@ async function pollState(){
   }catch(e){ $("#statusText").textContent = "offline"; }
 }
 
-/* logs */
+/* logs — main terminal takes scan lines, verify terminal takes verifier lines */
+function appendLog(term, e){
+  const div = document.createElement("div");
+  div.className = "ln";
+  div.innerHTML = '<span class="ts">' + esc(e.time) + "</span>" + rich(e.text);
+  term.appendChild(div);
+  while (term.children.length > 600) term.removeChild(term.firstChild);
+}
 async function pollLogs(){
   try{
     const r = await api("/api/logs?after=" + logSeq);
     if (!r.logs.length) return;
-    const term = $("#term");
+    const term = $("#term"), termV = $("#termVerify");
     const stick = term.scrollHeight - term.scrollTop - term.clientHeight < 48;
-    const empty = term.querySelector(".empty");
+    const stickV = termV.scrollHeight - termV.scrollTop - termV.clientHeight < 48;
+    const empty = term.querySelector(".empty"), emptyV = termV.querySelector(".empty");
     if (empty) empty.remove();
+    if (emptyV) emptyV.remove();
     for (const e of r.logs){
       logSeq = e.seq;
-      const div = document.createElement("div");
-      div.className = "ln";
-      div.innerHTML = '<span class="ts">' + esc(e.time) + "</span>" + rich(e.text);
-      term.appendChild(div);
+      appendLog(e.kind === "verify" ? termV : term, e);
     }
-    while (term.children.length > 600) term.removeChild(term.firstChild);
     if (stick) term.scrollTop = term.scrollHeight;
+    if (stickV) termV.scrollTop = termV.scrollHeight;
   }catch(e){}
 }
 /* secrets */
