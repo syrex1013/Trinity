@@ -87,7 +87,7 @@ input::placeholder{color:var(--mute)}
 .term-body{font-family:var(--mono);font-size:13px;line-height:1.5;height:420px;overflow-y:auto;padding:16px;white-space:pre-wrap;word-break:break-word}
 .term-body.v{height:280px}
 .ln{animation:fadein .2s ease}
-.ts{color:var(--mute);margin-right:12px}
+.ln.error{color:var(--red)}
 
 /* tables */
 .tbl-wrap{overflow-x:auto;margin-top:8px}
@@ -182,12 +182,29 @@ td.pkg:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3p
             <div class="checks">
               <label class="check"><input type="checkbox" id="optRandom"> random</label>
               <label class="check"><input type="checkbox" id="optForever"> forever</label>
+              <label class="check"><input type="checkbox" id="optVerify" checked> auto-verify secrets</label>
             </div>
           </div>
           <div class="field"><label for="optInterval">Interval (s)</label><input type="number" id="optInterval" value="30" min="0"></div>
           <div class="field"><label for="optWorkers">Workers</label><input type="number" id="optWorkers" value="4" min="1"></div>
           <div class="field"><label for="optLimit">Limit</label><input type="number" id="optLimit" value="0" min="0"></div>
           <div class="field"><label>&nbsp;</label><button class="btn danger" id="btnStop" hidden>Stop scan</button><button class="btn" id="btnStart">Start scan</button></div>
+        </div>
+        <div class="form-row">
+          <div class="field grow">
+            <label for="optPackages">Packages (comma separated)</label>
+            <input type="text" id="optPackages" placeholder="com.example.app, org.foo.bar">
+          </div>
+          <div class="field grow">
+            <label for="optTrufflehog">Trufflehog binary</label>
+            <input type="text" id="optTrufflehog" value="trufflehog">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label for="optRate">Rate (s/request)</label><input type="number" id="optRate" value="1" min="0.1" step="0.1"></div>
+          <div class="field"><label for="optRetries">Retries</label><input type="number" id="optRetries" value="2" min="0" max="10"></div>
+          <div class="field"><label for="optMaxMb">Max unpack (MB)</label><input type="number" id="optMaxMb" value="1000" min="1"></div>
+          <div class="field"><label for="optTimeout">Scan timeout (s)</label><input type="number" id="optTimeout" value="1800" min="60"></div>
         </div>
         <div class="form-row">
           <div class="field grow">
@@ -345,6 +362,7 @@ function setTab(name){
   activeTab = name;
   $$(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === name));
   $$(".panel").forEach(p => p.classList.toggle("on", p.id === "p-" + name));
+  if (name === "secrets" || name === "apps") refitTables();
   if (name === "secrets") loadSecrets();
   if (name === "apps") loadApps();
 }
@@ -371,10 +389,10 @@ async function pollState(){
   }catch(e){ $("#statusText").textContent = "offline"; }
 }
 
-/* logs — main terminal takes scan lines, verify terminal takes verifier lines */
+/* logs — main terminal takes every line; verify terminal additionally gets verifier lines */
 function appendLog(term, e){
   const div = document.createElement("div");
-  div.className = "ln";
+  div.className = "ln" + (e.kind === "error" ? " error" : "");
   div.innerHTML = '<span class="ts">' + esc(e.time) + "</span>" + rich(e.text);
   term.appendChild(div);
   while (term.children.length > 600) term.removeChild(term.firstChild);
@@ -391,7 +409,8 @@ async function pollLogs(){
     if (emptyV) emptyV.remove();
     for (const e of r.logs){
       logSeq = e.seq;
-      appendLog(e.kind === "verify" ? termV : term, e);
+      appendLog(term, e);
+      if (e.kind === "verify") appendLog(termV, e);
     }
     if (stick) term.scrollTop = term.scrollHeight;
     if (stickV) termV.scrollTop = termV.scrollHeight;
@@ -593,18 +612,24 @@ function initResizable(table){
   if (!Array.isArray(widths) || widths.length !== cols.length) widths = defaults.slice();
   const apply = () => cols.forEach((c, i) => c.style.width = widths[i] + "px");
   const save = () => { try{ localStorage.setItem("colw." + table.id, JSON.stringify(widths)); }catch(e){} };
-  /* shrink columns proportionally so the whole table fits its card */
+  /* scale columns so the table fills its card (grow and shrink) */
   const fit = () => {
     const avail = table.closest(".tbl-wrap").clientWidth;
     const total = widths.reduce((a, b) => a + b, 0);
-    if (total > avail && avail > 0){
-      widths = widths.map(w => Math.max(40, Math.round(w * avail / total)));
-      let over = widths.reduce((a, b) => a + b, 0) - avail;
-      while (over > 0){
-        const mi = widths.indexOf(Math.max(...widths));
-        const give = Math.min(over, widths[mi] - 40);
-        if (give <= 0) break;
-        widths[mi] -= give; over -= give;
+    if (avail > 0 && total > 0){
+      if (total > avail){
+        widths = widths.map(w => Math.max(40, Math.round(w * avail / total)));
+        let over = widths.reduce((a, b) => a + b, 0) - avail;
+        while (over > 0){
+          const mi = widths.indexOf(Math.max(...widths));
+          const give = Math.min(over, widths[mi] - 40);
+          if (give <= 0) break;
+          widths[mi] -= give; over -= give;
+        }
+      } else {
+        let scaled = widths.map(w => Math.round(w * avail / total));
+        scaled[scaled.length - 1] += avail - scaled.reduce((a, b) => a + b, 0);
+        widths = scaled;
       }
     }
     apply();
@@ -627,9 +652,11 @@ function initResizable(table){
     });
     th.appendChild(rs);
   });
+  return fit;
 }
-initResizable($("#secTable"));
-initResizable($("#appTable"));
+const secFit = initResizable($("#secTable"));
+const appFit = initResizable($("#appTable"));
+const refitTables = () => { secFit && secFit(); appFit && appFit(); };
 /* actions */
 $("#btnStart").addEventListener("click", async () => {
   const sources = [];
@@ -637,6 +664,17 @@ $("#btnStart").addEventListener("click", async () => {
   if ($("#srcAptoide").checked) sources.push("aptoide");
   if ($("#srcApkcombo").checked) sources.push("apkcombo");
   if ($("#srcLocal").checked) sources.push("local");
+  try{ localStorage.setItem("scanopts", JSON.stringify({
+    srcFdroid: $("#srcFdroid").checked, srcAptoide: $("#srcAptoide").checked,
+    srcApkcombo: $("#srcApkcombo").checked, srcLocal: $("#srcLocal").checked,
+    keywords: $("#keywords").value, optRandom: $("#optRandom").checked,
+    optForever: $("#optForever").checked, optVerify: $("#optVerify").checked,
+    optInterval: $("#optInterval").value, optWorkers: $("#optWorkers").value,
+    optLimit: $("#optLimit").value, optPackages: $("#optPackages").value,
+    optRate: $("#optRate").value, optRetries: $("#optRetries").value,
+    optMaxMb: $("#optMaxMb").value, optTimeout: $("#optTimeout").value,
+    optTrufflehog: $("#optTrufflehog").value
+  })); }catch(e){}
   try{
     await api("/api/scan/start", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({
       sources: sources.length ? sources : ["fdroid"],
@@ -645,7 +683,14 @@ $("#btnStart").addEventListener("click", async () => {
       forever: $("#optForever").checked,
       interval: $("#optInterval").value,
       workers: $("#optWorkers").value,
-      limit: $("#optLimit").value
+      limit: $("#optLimit").value,
+      packages: $("#optPackages").value,
+      rate: $("#optRate").value,
+      retries: $("#optRetries").value,
+      max_mb: $("#optMaxMb").value,
+      scan_timeout: $("#optTimeout").value,
+      trufflehog: $("#optTrufflehog").value,
+      verify: $("#optVerify").checked
     })});
     pollState();
   }catch(e){ alert(e.message); }
@@ -672,6 +717,18 @@ $("#btnRetry").addEventListener("click", async () => {
 });
 $("#btnClear").addEventListener("click", () => { $("#term").innerHTML = ""; });
 
+/* restore persisted scan options */
+try{
+  const saved = JSON.parse(localStorage.getItem("scanopts"));
+  if (saved && typeof saved === "object"){
+    for (const [id, val] of Object.entries(saved)){
+      const el = document.getElementById(id);
+      if (!el) continue;
+      if (el.type === "checkbox") el.checked = !!val;
+      else el.value = val;
+    }
+  }
+}catch(e){}
 /* polling */
 pollState(); pollLogs(); loadSecrets(); loadApps();
 setInterval(pollState, 2000);

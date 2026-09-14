@@ -59,7 +59,7 @@ brew install trufflehog        # or download from trufflehog releases
 
 - Overview: start/stop scans, live stats and terminal output (Escape stops too)
 - Secrets: filter all/working/broken/unmarked with live counts, free-text search (`/` focuses it), sort by any column, click a value (or ⧉) to copy it, detector names link to where the secret is used, export filtered rows as CSV or JSON
-- Verify: dedicated log panel for the auto-verifier, which probes ~30 secret types (Slack, Telegram, Discord, GitHub, GitLab, Stripe, OpenAI, Anthropic, Heroku, Dropbox, Mailgun, Mailchimp, Postmark, Figma, Asana, PagerDuty, Linear, New Relic, Spotify, Calendly, Datadog, …) against their provider APIs and marks them working/broken automatically
+- Verify: dedicated log panel for the auto-verifier, which probes ~45 secret types (Slack, Telegram, Discord, GitHub, GitLab, Google API keys, AWS, Stripe, OpenAI, Anthropic, Groq, Mistral, DeepSeek, HuggingFace, Heroku, Dropbox, Mailgun, Mailchimp, Postmark, Figma, Asana, PagerDuty, Linear, New Relic, Spotify, Calendly, Datadog, Notion, Postman, Sentry, Square, Cloudflare, …) against their provider APIs and marks them working/broken automatically. Shared Google `AIza` keys are cross-checked against Firebase/Maps before being marked broken (Android-restricted or Gemini-disabled keys read as invalid on the Gemini endpoint alone), AWS keys are verified with a SigV4-signed STS call, and unknown detector names fall back to value-shape matching (`sk-`, `ghp_`, `AKIA`, …)
 - Apps: searchable, sortable table; click a package to jump to its secrets; retry failed
 - Both tables fit their card and have drag-resizable columns (double-click a column edge to reset; widths persist in the browser)
 

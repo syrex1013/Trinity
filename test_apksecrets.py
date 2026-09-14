@@ -111,10 +111,104 @@ class ApkSecretsTests(unittest.TestCase):
         try:
             self.assertIs(apksecrets.verify_secret("TelegramBotToken", "123:abc"), True)
             self.assertIs(apksecrets.verify_secret("slack-webhook", "xoxb-1"), True)
-            self.assertIs(apksecrets.verify_secret("Box", "D08A4F1810F34A82B6B9"), None)  # no rule for generic Box
+            self.assertIs(apksecrets.verify_secret("Box", "D08A4F1810F34A82B6B9"), True)
             self.assertIn("api.telegram.org", probe.urls[0]); self.assertIn("slack.com", probe.urls[1])
+            self.assertIn("api.box.com", probe.urls[2])
         finally:
             apksecrets._probe = original
+
+    def _fake_probe(self, routes):
+        def probe(url, headers=None, data=None):
+            for host, answer in routes.items():
+                if host in url: return answer
+            raise AssertionError("unexpected probe " + url)
+        original = apksecrets._probe; apksecrets._probe = probe
+        return original
+
+    def test_google_key_live_on_firebase_despite_gemini_rejection(self):
+        restore = self._fake_probe({
+            "generativelanguage": (400, b'{"error":{"reason":"API_KEY_INVALID"}}'),
+            "identitytoolkit": (200, b'{"projectId":"1"}'),
+        })
+        try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), True)
+        finally: apksecrets._probe = restore
+
+    def test_google_key_expired_is_broken(self):
+        restore = self._fake_probe({
+            "generativelanguage": (400, b'{"error":{"reason":"API_KEY_INVALID"}}'),
+            "identitytoolkit": (400, b'{"error":"API key expired"}'),
+        })
+        try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), False)
+        finally: apksecrets._probe = restore
+
+    def test_google_key_android_restricted_stays_unverdicted(self):
+        restore = self._fake_probe({
+            "generativelanguage": (400, b'{"error":{"reason":"API_KEY_INVALID"}}'),
+            "identitytoolkit": (403, b"android client blocked"),
+            "maps.googleapis": (200, b'{"status":"REQUEST_DENIED","error_message":"This API is not activated on your API project."}'),
+        })
+        try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), None)
+        finally: apksecrets._probe = restore
+
+    def test_google_key_live_on_maps_despite_gemini_rejection(self):
+        restore = self._fake_probe({
+            "generativelanguage": (400, b'{"error":{"reason":"API_KEY_INVALID"}}'),
+            "identitytoolkit": (403, b"android client blocked"),
+            "maps.googleapis": (200, b'{"status":"ZERO_RESULTS"}'),
+        })
+        try: self.assertIs(apksecrets.verify_secret("UnknownDetector", "AIzaSyX"), True)
+        finally: apksecrets._probe = restore
+
+    def test_unknown_detector_uses_value_prefix(self):
+        restore = self._fake_probe({"api.groq.com": (200, b"[]")})
+        try: self.assertIs(apksecrets.verify_secret("SomeDetector", "gsk_abcdef"), True)
+        finally: apksecrets._probe = restore
+
+    def test_sk_prefix_falls_through_to_deepseek(self):
+        seen = []
+        def probe(url, headers=None):
+            seen.append(url)
+            return (401, b"") if "api.openai.com" in url else (200, b"[]")
+        original = apksecrets._probe; apksecrets._probe = probe
+        try: self.assertIs(apksecrets.verify_secret("SomeDetector", "sk-nothing"), True)
+        finally: apksecrets._probe = original
+        self.assertIn("api.deepseek.com", seen[-1])
+
+    def test_aws_key_is_sigv4_signed_against_sts(self):
+        seen = {}
+        def probe(url, headers=None):
+            seen["url"], seen["headers"] = url, headers or {}
+            return 403, b""
+        original = apksecrets._probe; apksecrets._probe = probe
+        try:
+            key = "AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+            self.assertIs(apksecrets.verify_secret("AWS", key), False)
+            self.assertIs(apksecrets.verify_secret("AWS", "not-an-aws-key"), None)
+        finally: apksecrets._probe = original
+        self.assertIn("sts.amazonaws.com", seen["url"])
+        self.assertIn("AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/", seen["headers"]["Authorization"])
+        self.assertIn("SignedHeaders=host;x-amz-date", seen["headers"]["Authorization"])
+
+    def test_cloudflare_token_success_field_decides(self):
+        restore = self._fake_probe({"api.cloudflare.com": (200, b'{"success":true,"result":{"status":"active"}}')})
+        try: self.assertIs(apksecrets.verify_secret("CloudflareAPIToken", "v1.0-abc"), True)
+        finally: apksecrets._probe = restore
+
+    def test_short_detector_names_do_not_capture_longer_ones(self):
+        restore = self._fake_probe({"api.box.com": (401, b""), "api.wit.ai": (400, b'{"code":"no-auth"}'),
+                                    "api.t.ly": (401, b""), "api.trello.com": (401, b"invalid key"),
+                                    "api.miro.com": (401, b""), "app.eraser.io": (401, b"Unauthenticated")})
+        try:
+            for name in ("Box", "Wit", "TLy", "TrelloApiKey", "Miro", "Eraser"):
+                self.assertIs(apksecrets.verify_secret(name, "z" * 32), False, name)
+            for name in ("BoxOauth", "Databox", "BuiltWith", "Rootly"):
+                self.assertIs(apksecrets.verify_secret(name, "z" * 32), None, name)
+        finally: apksecrets._probe = restore
+
+    def test_trello_key_is_judged_by_the_error_body(self):
+        restore = self._fake_probe({"api.trello.com": (401, b"invalid token")})
+        try: self.assertIs(apksecrets.verify_secret("TrelloApiKey", "z" * 32), True)  # key accepted, token missing
+        finally: apksecrets._probe = restore
 
     def test_apks_bundle_is_expanded(self):
         with tempfile.TemporaryDirectory() as d:
