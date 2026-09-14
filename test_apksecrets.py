@@ -148,6 +148,25 @@ class ApkSecretsTests(unittest.TestCase):
                 self.assertTrue(Path(job["report_path"]).is_file())
             finally: store.close()
 
+
+    def test_findings_job_also_deletes_apk(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); incoming = root / "incoming.apk"
+            with zipfile.ZipFile(incoming, "w") as z: z.writestr("assets/k.txt", "xoxb-1")
+            fake = root / "trufflehog"
+            fake.write_text('#!/bin/sh\nprintf \'{"DetectorName":"Slack","Raw":"xoxb-1","Verified":true,"SourceMetadata":{"Data":{"Filesystem":{"file":"assets/k.txt"}}}}\\n\'\nexit 0\n')
+            fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+            state = root / "state"
+            apksecrets.main(["--state", str(state), "import", str(incoming)])
+            apksecrets.main(["--state", str(state), "--trufflehog", str(fake), "run", "--source", "local", "--workers", "1"])
+            store = apksecrets.Store(state)
+            try:
+                job = store.jobs(("findings",))[0]
+                self.assertFalse(job["download_path"])  # apk deleted after secrets retained
+                self.assertFalse((store.root / "apks").exists() and list((store.root / "apks").glob("*.apk")))
+                self.assertEqual(len(store.secrets()), 1)
+            finally: store.close()
+
     def test_run_retries_a_failed_scan(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d); incoming = root / "incoming.apk"
