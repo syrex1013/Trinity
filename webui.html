@@ -284,8 +284,11 @@ td.pkg:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3p
     <section class="panel" id="p-verify">
       <div class="card">
         <div class="toolbar">
-          <span style="font-size:14px;font-weight:500">Auto-verifier log</span>
-          <span style="font-size:12px;color:var(--mute)">probes each secret against its provider; working/broken marked automatically</span>
+          <div class="tools">
+            <span style="font-size:14px;font-weight:500">Auto-verifier log</span>
+            <span style="font-size:12px;color:var(--mute)">probes each secret against its provider; working/broken marked automatically</span>
+          </div>
+          <button class="btn small" id="btnVerifyAll" title="re-probe every secret without a verdict now">Verify all</button>
         </div>
         <div class="term">
           <div class="term-body v" id="termVerify"></div>
@@ -714,6 +717,16 @@ $("#btnImport").addEventListener("click", async () => {
 });
 $("#btnRetry").addEventListener("click", async () => {
   try{ await api("/api/retry-failed", {method:"POST"}); loadApps(); }catch(e){}
+});
+$("#btnVerifyAll").addEventListener("click", async e => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try{
+    await api("/api/verify", {method:"POST"});
+    btn.textContent = "Started ✓";
+    pollLogs(); pollState();
+    setTimeout(() => { btn.textContent = "Verify all"; btn.disabled = false; }, 2000);
+  }catch(err){ alert(err.message); btn.disabled = false; }
 });
 $("#btnClear").addEventListener("click", () => { $("#term").innerHTML = ""; });
 

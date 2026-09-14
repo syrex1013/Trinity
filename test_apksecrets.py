@@ -2,6 +2,7 @@ import importlib.machinery
 import os
 import stat
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -253,6 +254,49 @@ class ApkSecretsTests(unittest.TestCase):
         restore = self._fake_probe({"api.trello.com": (401, b"invalid token")})
         try: self.assertIs(apksecrets.verify_secret("TrelloApiKey", "z" * 32), True)  # key accepted, token missing
         finally: apksecrets._probe = restore
+
+    def test_onesignal_and_honeycomb_rules(self):
+        restore = self._fake_probe({"api.onesignal.com": (401, b'{"errors":["Access denied"]}'),
+                                    "api.honeycomb.io": (200, b'{"team":{"slug":"t"}}')})
+        try:
+            self.assertIs(apksecrets.verify_secret("Onesignal", "os_v2_app_" + "a" * 60), False)
+            self.assertIs(apksecrets.verify_secret("Honeycomb", "a" * 32), True)
+        finally: apksecrets._probe = restore
+
+    def test_verifier_for_distinguishes_unknown_from_inconclusive(self):
+        self.assertIsNone(apksecrets.verifier_for("MysteryDetector", "zzz"))
+        self.assertIsNone(apksecrets.verify_secret("MysteryDetector", "zzz"))
+        restore = self._fake_probe({"api.onesignal.com": (400, b"deprecated v1 token")})
+        try: self.assertIs(apksecrets.verify_secret("Onesignal", "uuid-app-id"), None)  # probe ran, no verdict
+        finally: apksecrets._probe = restore
+
+    def test_auto_verifier_dedupes_values_and_reports_unchecked(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = apksecrets.Store(Path(d) / "state")
+            try:
+                job = store.add("local", "local://t", "com.t")
+                other = store.add("local", "local://t2", "com.t2")
+                now = time.time()
+                for job_id, detector, value in ((job["id"], "Slack", "xoxb-dup"), (other["id"], "Slack", "xoxb-dup"),
+                                                (job["id"], "Mystery", "zzz")):
+                    store.db.execute("INSERT INTO secrets(job_id,detector,value,file,verified,working,created_at) VALUES(?,?,?,?,0,NULL,?)",
+                                     (job_id, detector, value, "f", now))
+                store.db.commit()
+                probes = []
+                def fake_verifier_for(detector, value):
+                    return None if detector == "Mystery" else (lambda v: probes.append(v) or True)
+                original = apksecrets.verifier_for; apksecrets.verifier_for = fake_verifier_for
+                verifier = apksecrets.AutoVerifier(store)
+                try: verifier.pass_once()
+                finally: apksecrets.verifier_for = original
+                marked = {r["value"]: r["working"] for r in store.secrets()}
+                self.assertEqual(marked, {"xoxb-dup": 1, "zzz": None})
+                self.assertEqual(probes, ["xoxb-dup"])  # duplicate value probed once
+                self.assertEqual(verifier.tried, {1, 2, 3})
+                verifier.verify_now()  # manual pass re-arms every unchecked secret
+                self.assertEqual(verifier.tried, set())
+                self.assertTrue(verifier.wake.is_set())
+            finally: store.close()
 
     def test_apks_bundle_is_expanded(self):
         with tempfile.TemporaryDirectory() as d:
