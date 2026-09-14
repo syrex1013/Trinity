@@ -76,6 +76,50 @@ class ApkSecretsTests(unittest.TestCase):
                 self.assertEqual(store.jobs()[0]["version"], "2.0")
             finally: store.close()
 
+    def test_aptoide_keyword_matches_app_name_and_limit_caps_queued(self):
+        pages = [
+            {"datalist": {"list": [
+                {"package": "a.one", "name": "Payment Store", "file": {"path": "https://x/a.one-1.apk"}},
+                {"package": "a.two", "name": "OfficeSuite", "file": {"path": "https://x/a.two-1.apk"}},
+            ], "next": 2}},
+            {"datalist": {"list": [
+                {"package": "a.three", "name": "Bill Payment", "file": {"path": "https://x/a.three-1.apk"}},
+                {"package": "a.four", "name": "Payment Hub", "file": {"path": "https://x/a.four-1.apk"}},
+            ]}},
+        ]
+        class FakeFetcher:
+            def get(self, url): return json.dumps(pages[1] if "offset" in url else pages[0]).encode()
+        with tempfile.TemporaryDirectory() as d:
+            store = apksecrets.Store(Path(d) / "state")
+            try:
+                args = types.SimpleNamespace(source=["aptoide"], package=[], keyword=["payment"],
+                                             latest_artifact_limit=2, random=False)
+                list(apksecrets.discover(store, FakeFetcher(), args))
+                self.assertEqual({row["package"] for row in store.jobs()}, {"a.one", "a.three"})
+            finally: store.close()
+
+    def test_aptoide_limit_is_shared_across_keywords(self):
+        data = {"datalist": {"list": [
+            {"package": "a.one", "name": "Payment Store", "file": {"path": "https://x/a.one-1.apk"}},
+            {"package": "a.two", "name": "Wallet Hub", "file": {"path": "https://x/a.two-1.apk"}},
+        ]}}
+        class FakeFetcher:
+            def get(self, url): return json.dumps(data).encode()
+        with tempfile.TemporaryDirectory() as d:
+            store = apksecrets.Store(Path(d) / "state")
+            try:
+                args = types.SimpleNamespace(source=["aptoide"], package=[], keyword=["payment", "wallet"],
+                                             latest_artifact_limit=1, random=False)
+                list(apksecrets.discover(store, FakeFetcher(), args))
+                self.assertEqual([row["package"] for row in store.jobs()], ["a.one"])
+            finally: store.close()
+
+    def test_cli_packages_and_keywords_split_on_commas(self):
+        args = apksecrets.parser().parse_args(["run", "--keyword", "payment, wallet", "--keyword", "bank",
+                                               "--package", "com.a,com.b"])
+        self.assertEqual(args.keyword, ["payment", "wallet", "bank"])
+        self.assertEqual(args.package, ["com.a", "com.b"])
+
     def test_apkcombo_parsers(self):
         page = '<a href="/whatsapp/com.whatsapp/">WhatsApp</a> <a href="/search?q=1">x</a> <a href="../wechat/com.tencent.mm/">WeChat</a>'
         apps = apksecrets.apkcombo_apps(page, "https://apkcombo.com/search/whatsapp")
