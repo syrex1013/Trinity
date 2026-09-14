@@ -102,8 +102,9 @@ td{padding:10px 12px;border-bottom:1px solid var(--hairline);color:var(--body);v
 tr:hover td{background:rgba(247,245,240,.03)}
 td.mono{font-family:var(--mono);color:var(--ink)}
 td.id{font-family:var(--mono);color:var(--mute)}
+td.det a{color:var(--cyan);text-decoration:none;border-bottom:1px dotted var(--hairline)}
+td.det a:hover{border-bottom-color:var(--cyan)}
 td.val{font-family:var(--mono);color:var(--ink);cursor:copy}
-td.val .v{display:block;overflow:hidden;text-overflow:ellipsis}
 td.val.ok .v{color:var(--green)}
 td.pkg{cursor:pointer}
 td.pkg:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
@@ -165,7 +166,7 @@ td.pkg:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3p
             <div class="checks">
               <label class="check"><input type="checkbox" id="srcFdroid" checked> fdroid</label>
               <label class="check"><input type="checkbox" id="srcAptoide"> aptoide</label>
-              <label class="check"><input type="checkbox" id="srcApkmirror"> apkmirror</label>
+              <label class="check"><input type="checkbox" id="srcApkcombo"> apkcombo</label>
               <label class="check"><input type="checkbox" id="srcLocal"> local</label>
             </div>
           </div>
@@ -276,6 +277,28 @@ async function api(path, opts){
   return data;
 }
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+/* where each secret type is used — detector name (lowercased, substring) to service page */
+const DETECTOR_LINKS = [
+  ["slack", "Slack", "https://api.slack.com/authentication/token-types"],
+  ["telegram", "Telegram Bot API", "https://core.telegram.org/bots/api"],
+  ["discord", "Discord Developers", "https://discord.com/developers/applications"],
+  ["gemini", "Google AI Studio", "https://aistudio.google.com/apikey"],
+  ["github", "GitHub tokens", "https://github.com/settings/tokens"],
+  ["gitlab", "GitLab tokens", "https://gitlab.com/-/user_settings/personal_access_tokens"],
+  ["stripe", "Stripe API keys", "https://dashboard.stripe.com/apikeys"],
+  ["openai", "OpenAI keys", "https://platform.openai.com/api-keys"],
+  ["anthropic", "Anthropic console", "https://console.anthropic.com/settings/keys"],
+  ["sendgrid", "SendGrid keys", "https://app.sendgrid.com/settings/api_keys"],
+  ["airtable", "Airtable tokens", "https://airtable.com/create/tokens"],
+  ["npm", "npm tokens", "https://www.npmjs.com/settings/~/tokens"],
+  ["mapbox", "Mapbox tokens", "https://account.mapbox.com/access-tokens/"],
+  ["onesignal", "OneSignal keys", "https://dashboard.onesignal.com/apps"],
+];
+function detectorLink(name){
+  const n = (name || "").toLowerCase();
+  const hit = DETECTOR_LINKS.find(([pat]) => n.includes(pat));
+  return hit ? {label: hit[1], url: hit[2]} : null;
+}
 
 /* rich markup to html */
 const COLORS = {red:"#e07a5f", green:"#9cbb7f", yellow:"#d9b36c", cyan:"#86b7a8", dim:"#aea69c"};
@@ -323,9 +346,14 @@ async function pollState(){
     $("#btnStart").hidden = s.running;
     $("#btnStop").hidden = !s.running;
     const order = ["findings","clean","failed","queued","downloading","scanning"];
-    $("#stats").innerHTML = order.map(k =>
-      '<div class="stat ' + k + '"><div class="n">' + (s.counts[k] || 0) + '</div><div class="l">' + k + '</div></div>'
-    ).join("");
+    const sc = s.secret_counts || {};
+    $("#stats").innerHTML =
+      order.map(k =>
+        '<div class="stat ' + k + '"><div class="n">' + (s.counts[k] || 0) + '</div><div class="l">' + k + '</div></div>'
+      ).join("") +
+      '<div class="stat working"><div class="n">' + (sc.working || 0) + '</div><div class="l">secrets working</div></div>' +
+      '<div class="stat findings"><div class="n">' + (sc.broken || 0) + '</div><div class="l">secrets broken</div></div>' +
+      '<div class="stat"><div class="n">' + (sc.unchecked || 0) + '</div><div class="l">secrets unchecked</div></div>';
   }catch(e){ $("#statusText").textContent = "offline"; }
 }
 
@@ -390,17 +418,31 @@ function renderSortHeads(table, sort){
     }
   });
 }
+function secretStats(){
+  let working = 0, broken = 0;
+  for (const s of secretsCache){ if (s.working === 1) working++; else if (s.working === 0) broken++; }
+  return {working, broken, unchecked: secretsCache.length - working - broken, total: secretsCache.length};
+}
+function renderPills(){
+  const t = secretStats();
+  $$(".pill").forEach(p => {
+    const n = p.dataset.f === "working" ? t.working : p.dataset.f === "broken" ? t.broken :
+              p.dataset.f === "unmarked" ? t.unchecked : t.total;
+    p.textContent = p.textContent.replace(/\s+\d+$/, "") + " " + n;
+  });
+}
 function renderSecrets(){
   const rows = filteredSecrets();
   $("#secCount").textContent = rows.length + " of " + secretsCache.length;
   $("#secEmpty").hidden = rows.length > 0;
+  renderPills();
   renderSortHeads($("#secTable"), secSort);
   $("#secBody").innerHTML = rows.map(s => {
     const chip = s.working === 1 ? '<span class="chip working">working</span>' :
                  s.working === 0 ? '<span class="chip broken">broken</span>' : '<span style="color:var(--mute)">-</span>';
     return '<tr data-sid="' + s.id + '">' +
       '<td class="id">#' + s.id + "</td>" +
-      '<td class="det" title="' + esc(s.detector) + '"><b>' + esc(s.detector) + "</b></td>" +
+      '<td class="det" title="' + esc(s.detector) + '">' + (l => l ? '<a href="' + esc(l.url) + '" target="_blank" rel="noopener" title="open ' + esc(l.label) + '">' + esc(s.detector) + " ↗</a>" : "<b>" + esc(s.detector) + "</b>")(detectorLink(s.detector)) + "</td>" +
       '<td class="val" title="' + esc(s.value) + ' — click to copy"><span class="v">' + esc(s.value) + "</span></td>" +
       '<td class="mono app" title="' + esc(s.package || "") + '">' + esc(s.package || "-") + "</td>" +
       '<td class="mono file" title="' + esc(s.file) + '">' + esc(s.file) + "</td>" +
@@ -499,7 +541,7 @@ function renderApps(){
       '<td class="id">#' + a.id + "</td>" +
       "<td>" + esc(a.source) + "</td>" +
       '<td class="mono pkg" title="show secrets for this app">' + esc(a.package || "-") + "</td>" +
-      '<td class="mono">' + esc(a.version || "-") + "</td>" +
+      '<td class="mono" title="' + esc(a.version || "") + '">' + esc(a.version || "-") + "</td>" +
       '<td><span class="chip ' + esc(a.status) + '">' + esc(a.status) + "</span></td>" +
       '<td class="mono">' + a.secrets + "</td></tr>"
   ).join("");
@@ -531,7 +573,24 @@ function initResizable(table){
   if (!Array.isArray(widths) || widths.length !== cols.length) widths = defaults.slice();
   const apply = () => cols.forEach((c, i) => c.style.width = widths[i] + "px");
   const save = () => { try{ localStorage.setItem("colw." + table.id, JSON.stringify(widths)); }catch(e){} };
-  apply();
+  /* shrink columns proportionally so the whole table fits its card */
+  const fit = () => {
+    const avail = table.closest(".tbl-wrap").clientWidth;
+    const total = widths.reduce((a, b) => a + b, 0);
+    if (total > avail && avail > 0){
+      widths = widths.map(w => Math.max(40, Math.round(w * avail / total)));
+      let over = widths.reduce((a, b) => a + b, 0) - avail;
+      while (over > 0){
+        const mi = widths.indexOf(Math.max(...widths));
+        const give = Math.min(over, widths[mi] - 40);
+        if (give <= 0) break;
+        widths[mi] -= give; over -= give;
+      }
+    }
+    apply();
+  };
+  fit();
+  window.addEventListener("resize", fit);
   table.querySelectorAll("th").forEach((th, i) => {
     const rs = document.createElement("span");
     rs.className = "rs";
@@ -556,7 +615,7 @@ $("#btnStart").addEventListener("click", async () => {
   const sources = [];
   if ($("#srcFdroid").checked) sources.push("fdroid");
   if ($("#srcAptoide").checked) sources.push("aptoide");
-  if ($("#srcApkmirror").checked) sources.push("apkmirror");
+  if ($("#srcApkcombo").checked) sources.push("apkcombo");
   if ($("#srcLocal").checked) sources.push("local");
   try{
     await api("/api/scan/start", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({

@@ -45,18 +45,19 @@ class ApkSecretsTests(unittest.TestCase):
                                              latest_artifact_limit=0, random=False)
                 class FakeFetcher:
                     def get(self, url): return json.dumps(data).encode()
-                apksecrets.discover(store, FakeFetcher(), args)
+                run = lambda: list(apksecrets.discover(store, FakeFetcher(), args))
+                run()
                 self.assertEqual(len(store.jobs()), 2)
-                apksecrets.discover(store, FakeFetcher(), args)
+                run()
                 self.assertEqual(len(store.jobs()), 2)
                 data["packages"]["z"] = [{"versionCode": 1, "apkName": "z-1.apk"}]
-                apksecrets.discover(store, FakeFetcher(), args)
+                run()
                 self.assertEqual(len(store.jobs()), 3)
             finally: store.close()
 
     def test_aptoide_queues_every_matching_release(self):
         data = {"datalist": {"list": [
-            {"package": "app.one", "vername": "2.0", "file": {"path": "https://x/app.one-2.apk"}},
+            {"package": "app.one", "vername": "9.9-top", "file": {"vername": "2.0", "path": "https://x/app.one-2.apk"}},
             {"package": "app.two", "vername": "1.0", "file": {"path": "https://x/app.two-1.apk"}},
             {"package": "app.three", "vername": "1.0", "file": {}},
         ]}}
@@ -69,10 +70,51 @@ class ApkSecretsTests(unittest.TestCase):
                                              latest_artifact_limit=0, random=False)
                 class FakeFetcher:
                     def get(self, url): return json.dumps(data).encode()
-                apksecrets.discover(store, FakeFetcher(), args)
+                list(apksecrets.discover(store, FakeFetcher(), args))
                 queued = {row["package"] for row in store.jobs()}
                 self.assertEqual(queued, {"app.one", "app.two"})
+                self.assertEqual(store.jobs()[0]["version"], "2.0")
             finally: store.close()
+
+    def test_apkcombo_parsers(self):
+        page = '<a href="/whatsapp/com.whatsapp/">WhatsApp</a> <a href="/search?q=1">x</a> <a href="../wechat/com.tencent.mm/">WeChat</a>'
+        apps = apksecrets.apkcombo_apps(page, "https://apkcombo.com/search/whatsapp")
+        self.assertEqual(apps, [("com.whatsapp", "https://apkcombo.com/whatsapp/com.whatsapp/"), ("com.tencent.mm", "https://apkcombo.com/wechat/com.tencent.mm/")])
+        variant = '<a href="/r2?u=https%3A%2F%2Fcdn.example.com%2Fapp%2F2.0%2Ffile.apks%3Fx%3D1">dl</a>'
+        class FakeFetcher:
+            def get(self, url):
+                assert "/download/" in url, url
+                return (variant if url.endswith("download/apk") else "ver /download/phone-2.0.1-apk").encode()
+        self.assertEqual(apksecrets.apkcombo_release(FakeFetcher(), "https://apkcombo.com/whatsapp/com.whatsapp/"),
+                         ("https://cdn.example.com/app/2.0/file.apks?x=1", "2.0.1"))
+
+    def test_discovery_failure_isolated_per_source(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = apksecrets.Store(Path(d) / "state")
+            try:
+                data = {"packages": {"x": [{"versionCode": 1, "apkName": "x-1.apk"}]}}
+                class FakeFetcher:
+                    def get(self, url):
+                        if "apkcombo" in url: raise apksecrets.Error("blocked")
+                        return json.dumps(data).encode()
+                args = types.SimpleNamespace(source=["fdroid", "apkcombo"], package=[], keyword=[],
+                                             latest_artifact_limit=0, random=False)
+                list(apksecrets.discover(store, FakeFetcher(), args))
+                self.assertEqual(len(store.jobs()), 1)  # fdroid release queued, apkcombo failure skipped
+            finally: store.close()
+
+    def test_verify_secret_uses_expected_urls(self):
+        class FakeProbe:
+            def __init__(self): self.urls = []
+            def __call__(self, url, headers=None): self.urls.append(url); return 200, b'{"ok": true}'
+        probe = FakeProbe(); original = apksecrets._probe; apksecrets._probe = probe
+        try:
+            self.assertIs(apksecrets.verify_secret("TelegramBotToken", "123:abc"), True)
+            self.assertIs(apksecrets.verify_secret("slack-webhook", "xoxb-1"), True)
+            self.assertIs(apksecrets.verify_secret("Box", "D08A4F1810F34A82B6B9"), None)  # no rule for generic Box
+            self.assertIn("api.telegram.org", probe.urls[0]); self.assertIn("slack.com", probe.urls[1])
+        finally:
+            apksecrets._probe = original
 
     def test_apks_bundle_is_expanded(self):
         with tempfile.TemporaryDirectory() as d:

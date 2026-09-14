@@ -41,7 +41,7 @@ brew install trufflehog        # or download from trufflehog releases
 | --- | --- |
 | `fdroid` | full index scan; keywords match package id or app name |
 | `aptoide` | search API; keyword scans queue every matching app |
-| `apkmirror` | search page scrape; normal artifact links only, no bypasses |
+| `apkcombo` | search page scrape; latest release of each matching app |
 | `local` | via `import` subcommand or `--import` |
 
 ### Commands
@@ -58,9 +58,9 @@ brew install trufflehog        # or download from trufflehog releases
 ## Web UI
 
 - Overview: start/stop scans, live stats and terminal output (Escape stops too)
-- Secrets: filter all/working/broken/unmarked, free-text search (`/` focuses it), sort by any column, click a value (or ⧉) to copy it, export filtered rows as CSV or JSON
+- Secrets: filter all/working/broken/unmarked with live counts, free-text search (`/` focuses it), sort by any column, click a value (or ⧉) to copy it, detector names link to where the secret is used, export filtered rows as CSV or JSON; an auto-verifier marks supported secret types (Slack, Telegram, Discord, GitHub, OpenAI, …) working/broken as they appear
 - Apps: searchable, sortable table; click a package to jump to its secrets; retry failed
-- Both tables have drag-resizable columns (double-click a column edge to reset; widths persist in the browser)
+- Both tables fit their card and have drag-resizable columns (double-click a column edge to reset; widths persist in the browser)
 
 Continuous (`forever`) scans only queue releases not already in the database, so every cycle keeps discovering new apps instead of rescanning old ones.
 
