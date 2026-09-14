@@ -297,7 +297,9 @@ const DETECTOR_LINKS = [
 function detectorLink(name){
   const n = (name || "").toLowerCase();
   const hit = DETECTOR_LINKS.find(([pat]) => n.includes(pat));
-  return hit ? {label: hit[1], url: hit[2]} : null;
+  if (hit) return {label: hit[1], url: hit[2]};
+  if (n && n !== "?") return {label: "find service", url: "https://www.google.com/search?q=" + encodeURIComponent(n + " API key")};
+  return null;
 }
 
 /* rich markup to html */
