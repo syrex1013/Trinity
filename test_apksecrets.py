@@ -186,19 +186,29 @@ class ApkSecretsTests(unittest.TestCase):
         try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), False)
         finally: apksecrets._probe = restore
 
-    def test_google_key_android_restricted_stays_unverdicted(self):
+    def test_google_key_resolving_to_a_project_is_working(self):
+        # the apk-typical case: every probed API is disabled/restricted, but
+        # Google's project-level denials prove the key itself is live
+        restore = self._fake_probe({
+            "generativelanguage": (403, b'{"error":{"code":403,"status":"PERMISSION_DENIED"}}'),
+            "identitytoolkit": (403, b'{"error":{"message":"Identity Toolkit API has not been used in project 677718168881 before or it is disabled"}}'),
+        })
+        try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), True)
+        finally: apksecrets._probe = restore
+
+    def test_google_key_denied_on_maps_for_project_reasons_is_working(self):
         restore = self._fake_probe({
             "generativelanguage": (400, b'{"error":{"reason":"API_KEY_INVALID"}}'),
-            "identitytoolkit": (403, b"android client blocked"),
+            "identitytoolkit": (429, b"resource exhausted"),  # firebase unreachable: Maps decides
             "maps.googleapis": (200, b'{"status":"REQUEST_DENIED","error_message":"This API is not activated on your API project."}'),
         })
-        try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), None)
+        try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), True)
         finally: apksecrets._probe = restore
 
     def test_google_key_live_on_maps_despite_gemini_rejection(self):
         restore = self._fake_probe({
             "generativelanguage": (400, b'{"error":{"reason":"API_KEY_INVALID"}}'),
-            "identitytoolkit": (403, b"android client blocked"),
+            "identitytoolkit": (429, b"resource exhausted"),  # firebase unreachable: Maps decides
             "maps.googleapis": (200, b'{"status":"ZERO_RESULTS"}'),
         })
         try: self.assertIs(apksecrets.verify_secret("UnknownDetector", "AIzaSyX"), True)
