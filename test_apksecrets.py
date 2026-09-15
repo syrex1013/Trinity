@@ -155,7 +155,7 @@ class ApkSecretsTests(unittest.TestCase):
         probe = FakeProbe(); original = apksecrets._probe; apksecrets._probe = probe
         try:
             self.assertIs(apksecrets.verify_secret("TelegramBotToken", "123:abc"), True)
-            self.assertIs(apksecrets.verify_secret("slack-webhook", "xoxb-1"), True)
+            self.assertIs(apksecrets.verify_secret("SlackBotToken", "xoxb-1"), True)
             self.assertIs(apksecrets.verify_secret("Box", "D08A4F1810F34A82B6B9"), True)
             self.assertIn("api.telegram.org", probe.urls[0]); self.assertIn("slack.com", probe.urls[1])
             self.assertIn("api.box.com", probe.urls[2])
@@ -218,6 +218,68 @@ class ApkSecretsTests(unittest.TestCase):
         restore = self._fake_probe({"api.groq.com": (200, b"[]")})
         try: self.assertIs(apksecrets.verify_secret("SomeDetector", "gsk_abcdef"), True)
         finally: apksecrets._probe = restore
+
+    def test_webhook_urls_route_to_the_webhook_rule_not_token_rules(self):
+        restore = self._fake_probe({"hooks.slack.com": (400, b"no_text"),
+                                    "discord": (200, b'{"id":"1","name":"hook"}')})
+        try:
+            # valid hooks: slack's empty POST is rejected without sending, discord's GET answers
+            self.assertIs(apksecrets.verify_secret("SlackWebhook", "https://hooks.slack.com/services/T123/B456/xyzabc"), True)
+            self.assertIs(apksecrets.verify_secret("DiscordWebhook", "https://discord.com/api/webhooks/123/abc-DEF_123"), True)
+            self.assertIs(apksecrets.verify_secret("DiscordWebhook", "https://discordapp.com/api/webhooks/123/abc-DEF_123"), True)
+            self.assertIs(apksecrets.verify_secret("WebhookSite", "https://example.com/hook"), None)  # unknown kind: never probed
+        finally: apksecrets._probe = restore
+        restore = self._fake_probe({"hooks.slack.com": (404, b"no_team"), "discord.com": (404, b"")})
+        try:
+            self.assertIs(apksecrets.verify_secret("SlackWebhook", "https://hooks.slack.com/services/T123/B456/xyzabc"), False)
+            self.assertIs(apksecrets.verify_secret("DiscordWebhook", "https://discord.com/api/webhooks/123/abc-DEF_123"), False)
+        finally: apksecrets._probe = restore
+
+    def test_facebook_and_twitter_token_rules(self):
+        restore = self._fake_probe({
+            "graph.facebook.com": (400, b'{"error":{"message":"Malformed access token","type":"OAuthException"}}'),
+            "api.twitter.com": (401, b""),
+        })
+        try:
+            self.assertIs(apksecrets.verify_secret("FacebookOAuth", "EAAZfake"), False)
+            self.assertIs(apksecrets.verify_secret("SomeDetector", "EAAZfake"), False)  # prefix fallback
+            self.assertIs(apksecrets.verify_secret("TwitterBearerToken", "A" * 46 + "fake1"), False)
+            self.assertIs(apksecrets.verify_secret("Twitter", "consumer-key-not-a-bearer"), None)  # never probed
+        finally: apksecrets._probe = restore
+        restore = self._fake_probe({"graph.facebook.com": (200, b'{"id":"1029384756"}')})
+        try: self.assertIs(apksecrets.verify_secret("FacebookOAuth", "EAAZreal"), True)
+        finally: apksecrets._probe = restore
+
+    def test_twilio_and_razorpay_need_the_full_pair(self):
+        restore = self._fake_probe({"api.twilio.com": (200, b'{"sid":"AC1"}'), "api.razorpay.com": (401, b'{"error":{"code":"BAD_API_KEY"}}')})
+        try:
+            self.assertIs(apksecrets.verify_secret("TwilioAPIKey", "AC" + "a" * 32 + ":" + "b" * 32), True)
+            self.assertIs(apksecrets.verify_secret("TwilioAPIKey", "AC" + "a" * 32), None)  # sid only: never probed
+            self.assertIs(apksecrets.verify_secret("Razorpay", "rzp_live_" + "a" * 14 + ":" + "b" * 30), False)
+            self.assertIs(apksecrets.verify_secret("Razorpay", "rzp_live_" + "a" * 14), None)  # key id only: never probed
+        finally: apksecrets._probe = restore
+
+    def test_google_oauth_token_never_hits_the_gemini_endpoint(self):
+        restore = self._fake_probe({"oauth2.googleapis.com": (400, b'{"error":"invalid_token"}')})
+        try:
+            self.assertIs(apksecrets.verify_secret("GoogleOAuth2AccessToken", "ya29.a0fake"), False)
+            self.assertIs(apksecrets.verify_secret("SomeDetector", "ya29.a0fake"), False)  # prefix fallback
+        finally: apksecrets._probe = restore
+
+    def test_brevo_and_messagebird_rules(self):
+        restore = self._fake_probe({"api.brevo.com": (200, b'{"email":"a@b.c"}'), "rest.messagebird.com": (401, b"")})
+        try:
+            self.assertIs(apksecrets.verify_secret("SendinBlue", "xkeysib-" + "a" * 30), True)
+            self.assertIs(apksecrets.verify_secret("SomeDetector", "xkeysib-" + "a" * 30), True)  # prefix fallback
+            self.assertIs(apksecrets.verify_secret("MessageBird", "live_" + "a" * 20), False)
+        finally: apksecrets._probe = restore
+
+    def test_inconclusive_reason_explains_unverifiable_secrets(self):
+        self.assertEqual(apksecrets.inconclusive_reason("Onesignal", "b2f7f966-d8cc-4d0f-9e21-2c8b7a1d5f3e"), "app id, not a credential")
+        self.assertEqual(apksecrets.inconclusive_reason("TwilioAPIKey", "AC" + "a" * 32), "token without its account sid")
+        self.assertEqual(apksecrets.inconclusive_reason("Razorpay", "rzp_live_" + "a" * 14), "key id without its secret")
+        self.assertEqual(apksecrets.inconclusive_reason("Twitter", "consumer-key"), "consumer key or user token, not a bearer")
+        self.assertEqual(apksecrets.inconclusive_reason("GoogleGeminiAPIKey", "AIzaX"), "probe inconclusive")
 
     def test_sk_prefix_falls_through_to_deepseek(self):
         seen = []
