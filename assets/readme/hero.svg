@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-labelledby="title desc">
+  <title id="title">apksecrets</title>
+  <desc id="desc">Local checkpointed APK secret scanner. Discover apps, download and unpack APKs, scan with trufflehog, and retain findings in a local SQLite database.</desc>
+
+  <rect width="1200" height="340" rx="8" fill="#2B2622"/>
+
+  <text x="56" y="52" fill="#AEA69C" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" letter-spacing="3.2">LOCAL APK SECRET SCANNER</text>
+
+  <text x="56" y="118" fill="#F7F5F0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="56" font-weight="600">apksecrets</text>
+
+  <text x="56" y="162" fill="#C9C0AD" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="22">Discover Android apps, extract secrets, and prove which keys still work.</text>
+
+  <rect x="56" y="204" width="1088" height="96" rx="4" fill="#383330" stroke="#3F3A36"/>
+  <line x1="273.6" y1="220" x2="273.6" y2="284" stroke="#3F3A36"/>
+  <line x1="491.2" y1="220" x2="491.2" y2="284" stroke="#3F3A36"/>
+  <line x1="708.8" y1="220" x2="708.8" y2="284" stroke="#3F3A36"/>
+  <line x1="926.4" y1="220" x2="926.4" y2="284" stroke="#3F3A36"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" text-anchor="middle">
+    <text x="164.8" y="246" fill="#86B7A8" font-size="18">01</text>
+    <text x="164.8" y="274" fill="#F7F5F0" font-size="20">discover</text>
+
+    <text x="382.4" y="246" fill="#86B7A8" font-size="18">02</text>
+    <text x="382.4" y="274" fill="#F7F5F0" font-size="20">download</text>
+
+    <text x="600" y="246" fill="#86B7A8" font-size="18">03</text>
+    <text x="600" y="274" fill="#F7F5F0" font-size="20">unpack</text>
+
+    <text x="817.6" y="246" fill="#86B7A8" font-size="18">04</text>
+    <text x="817.6" y="274" fill="#F7F5F0" font-size="20">scan</text>
+
+    <text x="1035.2" y="246" fill="#86B7A8" font-size="18">05</text>
+    <text x="1035.2" y="274" fill="#F7F5F0" font-size="20">retain</text>
+  </g>
+</svg>

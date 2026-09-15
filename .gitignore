@@ -6,6 +6,24 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# secrets / local env
+.env
+.env.*
+
+# local artifacts
+*.apk
+*.apkm
+*.apks
+*.xapk
 
 # editor / OS
 .DS_Store
@@ -17,3 +35,4 @@ Thumbs.db
 # local harness
 .pi/
 .pi-loop.json.lock
+

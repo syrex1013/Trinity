@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="wf-title wf-desc">
+  <title id="wf-title">How apksecrets works</title>
+  <desc id="wf-desc">Apps arrive from F-Droid, Aptoide, APKCombo, or a local import. Jobs checkpoint in SQLite, trufflehog scans unpacked APKs, then an auto-verifier and local web UI triage live keys.</desc>
+
+  <rect width="1200" height="400" rx="8" fill="#2B2622"/>
+
+  <text x="56" y="48" fill="#AEA69C" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" letter-spacing="3.2">PIPELINE</text>
+  <text x="56" y="86" fill="#F7F5F0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="600">From store listing to a verified secret</text>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="56" y="118" width="528" height="122" rx="4" fill="#383330" stroke="#3F3A36"/>
+    <text x="80" y="156" fill="#86B7A8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">01  sources</text>
+    <text x="80" y="188" fill="#F7F5F0" font-size="22">F-Droid · Aptoide · APKCombo · local</text>
+    <text x="80" y="216" fill="#AEA69C" font-size="18">Keyword, package, or a folder of APKs</text>
+
+    <rect x="616" y="118" width="528" height="122" rx="4" fill="#383330" stroke="#3F3A36"/>
+    <text x="640" y="156" fill="#86B7A8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">02  checkpoint</text>
+    <text x="640" y="188" fill="#F7F5F0" font-size="22">Jobs resume from SQLite</text>
+    <text x="640" y="216" fill="#AEA69C" font-size="18">Failed scans retry. Known URLs are skipped.</text>
+
+    <rect x="56" y="256" width="528" height="122" rx="4" fill="#383330" stroke="#3F3A36"/>
+    <text x="80" y="294" fill="#86B7A8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">03  scan</text>
+    <text x="80" y="326" fill="#F7F5F0" font-size="22">trufflehog on unpacked APKs</text>
+    <text x="80" y="354" fill="#AEA69C" font-size="18">Split bundles expanded. APK deleted after retain.</text>
+
+    <rect x="616" y="256" width="528" height="122" rx="4" fill="#383330" stroke="#3F3A36"/>
+    <text x="640" y="294" fill="#86B7A8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18">04  verify</text>
+    <text x="640" y="326" fill="#F7F5F0" font-size="22">Live checks on ~66 providers</text>
+    <text x="640" y="354" fill="#AEA69C" font-size="18">Working / broken / unmarked in the local UI</text>
+  </g>
+</svg>

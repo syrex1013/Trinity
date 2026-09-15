@@ -1,14 +1,23 @@
+import base64
+import gzip
+import http.server
 import importlib.machinery
+import io
+import json
 import os
+import sqlite3
 import stat
 import tempfile
+import threading
 import time
-import unittest
-import zipfile
-from pathlib import Path
-
-import json
 import types
+import unittest
+import urllib.error
+import urllib.request
+import zipfile
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
 
 apksecrets = importlib.machinery.SourceFileLoader("apksecrets", "apksecrets").load_module()
 
@@ -478,4 +487,328 @@ class ApkSecretsTests(unittest.TestCase):
             try: self.assertEqual(store.jobs(("clean",))[0]["retries"], 1)
             finally: store.close()
 
+
+class StoreImportCliTests(unittest.TestCase):
+    def test_store_chmod_and_record_secrets(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / "state"
+            store = apksecrets.Store(root)
+            try:
+                self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o700)
+                job = store.add("local", "local://rec", "com.rec", "1")
+                report = root / "report.jsonl"
+                report.write_text(json.dumps({
+                    "DetectorName": "Slack", "Raw": "xoxb-recorded",
+                    "Verified": False,
+                    "SourceMetadata": {"Data": {"Filesystem": {"file": "res/values.xml"}}},
+                }) + "\nnot json\n")
+                store.record_secrets(job["id"], report)
+                rows = store.secrets()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["detector"], "Slack")
+                self.assertEqual(rows[0]["value"], "xoxb-recorded")
+                self.assertEqual(rows[0]["file"], "res/values.xml")
+                self.assertEqual(rows[0]["verified"], 0)
+            finally:
+                store.close()
+
+    def test_import_folder_skips_non_zip_and_dedupes(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d) / "apks"; folder.mkdir()
+            good = folder / "ok.apk"
+            with zipfile.ZipFile(good, "w") as z: z.writestr("a.txt", "a")
+            (folder / "bad.apk").write_bytes(b"not a zip")
+            (folder / "skip.txt").write_text("nope")
+            store = apksecrets.Store(Path(d) / "state")
+            try:
+                apksecrets.import_files(store, folder)
+                self.assertEqual(len(store.jobs()), 1)
+                apksecrets.import_files(store, folder)
+                self.assertEqual(len(store.jobs()), 1)
+                self.assertTrue(store.jobs()[0]["release_url"].startswith("local://"))
+            finally:
+                store.close()
+
+    def test_cli_status_apps_secrets_mark_retry(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / "state"
+            incoming = Path(d) / "app.apk"
+            with zipfile.ZipFile(incoming, "w") as z: z.writestr("x", "ok")
+            self.assertEqual(apksecrets.main(["--state", str(state), "import", str(incoming)]), 0)
+            store = apksecrets.Store(state)
+            try:
+                job = store.jobs()[0]
+                store.update(job["id"], status="failed", retries=2, error="boom")
+                now = time.time()
+                store.db.execute(
+                    "INSERT INTO secrets(job_id,detector,value,file,verified,working,created_at) VALUES(?,?,?,?,0,NULL,?)",
+                    (job["id"], "Slack", "xoxb-cli", "f", now))
+                store.db.commit()
+            finally:
+                store.close()
+            buf = StringIO()
+            with redirect_stdout(buf):
+                self.assertEqual(apksecrets.main(["--state", str(state), "status"]), 0)
+                self.assertEqual(apksecrets.main(["--state", str(state), "failures"]), 0)
+                self.assertEqual(apksecrets.main(["--state", str(state), "apps"]), 0)
+                self.assertEqual(apksecrets.main(["--state", str(state), "secrets"]), 0)
+                self.assertEqual(apksecrets.main(["--state", str(state), "mark", "1", "working"]), 0)
+                self.assertEqual(apksecrets.main(["--state", str(state), "retry-failed"]), 0)
+            store = apksecrets.Store(state)
+            try:
+                self.assertEqual(store.secrets()[0]["working"], 1)
+                self.assertEqual(store.jobs(("queued",))[0]["retries"], 0)
+                working = store.secrets(working=True)
+                self.assertEqual(len(working), 1)
+            finally:
+                store.close()
+
+    def test_parser_serve_defaults_to_localhost(self):
+        args = apksecrets.parser().parse_args(["serve"])
+        self.assertEqual(args.host, "127.0.0.1")
+        self.assertEqual(args.port, 8000)
+        run = apksecrets.parser().parse_args(["run"])
+        self.assertEqual(run.source, [])
+
+    def test_report_files_are_private(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d); incoming = root / "incoming.apk"
+            with zipfile.ZipFile(incoming, "w") as z: z.writestr("x", "ok")
+            fake = root / "trufflehog"
+            fake.write_text("#!/bin/sh\nexit 0\n")
+            fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+            state = root / "state"
+            apksecrets.main(["--state", str(state), "import", str(incoming)])
+            apksecrets.main(["--state", str(state), "--trufflehog", str(fake), "run", "--source", "local", "--workers", "1"])
+            reports = list((state / "reports").glob("*.jsonl"))
+            self.assertTrue(reports)
+            self.assertEqual(stat.S_IMODE(reports[0].stat().st_mode), 0o600)
+
+
+class FetcherUnpackApkcomboTests(unittest.TestCase):
+    def test_fetcher_gzip_and_304_revalidate(self):
+        payload = b'{"ok": true}'
+        compressed = gzip.compress(payload)
+        calls = []
+        original_min = apksecrets.Fetcher.REVALIDATE_MIN
+        original_urlopen = urllib.request.urlopen
+
+        class Resp:
+            def __init__(self, data, headers):
+                self._data, self.headers = data, headers
+            def read(self, n=-1):
+                chunk, self._data = self._data[:n], self._data[n:]
+                return chunk
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        def fake_urlopen(request, timeout=60):
+            calls.append(request.get_header("If-none-match") or request.headers.get("If-None-Match"))
+            if request.headers.get("If-None-Match"):
+                raise urllib.error.HTTPError(request.full_url, 304, "Not Modified", {}, io.BytesIO())
+            return Resp(compressed, {"Content-Encoding": "gzip", "ETag": '"v1"', "Content-Length": str(len(compressed))})
+
+        apksecrets.Fetcher.REVALIDATE_MIN = 1
+        urllib.request.urlopen = fake_urlopen
+        try:
+            fetch = apksecrets.Fetcher(0)
+            self.assertEqual(fetch.get("https://example.test/index"), payload)
+            self.assertEqual(fetch.get("https://example.test/index"), payload)
+            self.assertEqual(len(calls), 2)
+            self.assertIsNone(calls[0])
+            self.assertEqual(calls[1], '"v1"')
+        finally:
+            urllib.request.urlopen = original_urlopen
+            apksecrets.Fetcher.REVALIDATE_MIN = original_min
+
+    def test_download_rejects_non_zip(self):
+        original = urllib.request.urlopen
+
+        class Resp:
+            def __init__(self): self._data = b"not-an-apk"
+            def read(self, n=-1):
+                chunk, self._data = self._data[:n], self._data[n:]
+                return chunk
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+
+        urllib.request.urlopen = lambda request, timeout=60: Resp()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                target = Path(d) / "app.apk"
+                with self.assertRaises(apksecrets.Error) as ctx:
+                    apksecrets.Fetcher(0).download("https://example.test/app.apk", target)
+                self.assertIn("ZIP/APK", str(ctx.exception))
+                self.assertFalse(target.exists())
+                self.assertFalse(list(Path(d).glob("*.part")))
+        finally:
+            urllib.request.urlopen = original
+
+    def test_unpack_rejects_archive_bomb(self):
+        with tempfile.TemporaryDirectory() as d:
+            apk = Path(d) / "bomb.apk"
+            with zipfile.ZipFile(apk, "w") as z: z.writestr("big.bin", "x" * 500)
+            with self.assertRaises(apksecrets.Error) as ctx:
+                apksecrets.safe_unpack(apk, Path(d) / "out", 100)
+            self.assertIn("expands", str(ctx.exception))
+
+    def test_apkcombo_release_base64_download_link(self):
+        artifact = "https://cdn.example.com/app/3.1/file.apk"
+        encoded = base64.b64encode(artifact.encode()).decode()
+        variant = f'<a href="/d?u={encoded}">dl</a>'
+
+        class FakeFetcher:
+            def get(self, url):
+                if url.endswith("download/apk"): return variant.encode()
+                return b"version /download/phone-3.1-apk"
+
+        self.assertEqual(
+            apksecrets.apkcombo_release(FakeFetcher(), "https://apkcombo.com/whatsapp/com.whatsapp/"),
+            (artifact, "3.1"))
+
+
+class VerifierRoutingTests(unittest.TestCase):
+    def test_github_openai_stripe_anthropic_probe_shape(self):
+        seen = []
+        def probe(url, headers=None, data=None):
+            seen.append((url, headers or {}, data))
+            if "api.stripe.com" in url: return 403, b"{}"
+            if "api.anthropic.com" in url: return 200, b'{"data":[]}'
+            return 200, b"{}"
+        original = apksecrets._probe; apksecrets._probe = probe
+        try:
+            self.assertIs(apksecrets.verify_secret("Github", "ghp_abcdef"), True)
+            self.assertIs(apksecrets.verify_secret("OpenAI", "sk-proj-abcdef"), True)
+            self.assertIs(apksecrets.verify_secret("Stripe", "sk_live_abcdef"), True)
+            self.assertIs(apksecrets.verify_secret("Anthropic", "sk-ant-abcdef"), True)
+        finally:
+            apksecrets._probe = original
+        urls = [u for u, _, _ in seen]
+        self.assertTrue(any("api.github.com/octocat" in u for u in urls))
+        self.assertTrue(any("api.openai.com/v1/models" in u for u in urls))
+        self.assertTrue(any("api.stripe.com/v1/balance" in u for u in urls))
+        anthropic = next(item for item in seen if "api.anthropic.com" in item[0])
+        self.assertEqual(anthropic[1].get("x-api-key"), "sk-ant-abcdef")
+        self.assertEqual(anthropic[1].get("anthropic-version"), "2023-06-01")
+
+
+class WebUiTests(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.state = Path(self.td.name) / "state"
+        captured = []
+        orig = http.server.ThreadingHTTPServer
+        class Capture(orig):
+            def __init__(self, addr, handler):
+                super().__init__(addr, handler)
+                captured.append(self)
+        http.server.ThreadingHTTPServer = Capture
+        args = apksecrets.parser().parse_args([
+            "--state", str(self.state), "serve", "--host", "127.0.0.1", "--port", "0"])
+        self.thread = threading.Thread(target=apksecrets.serve, args=(args,), daemon=True)
+        self.thread.start()
+        try:
+            for _ in range(250):
+                if captured: break
+                time.sleep(0.01)
+            else:
+                raise RuntimeError("web UI server did not start")
+        finally:
+            http.server.ThreadingHTTPServer = orig
+        self.server = captured[0]
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.thread.join(timeout=3)
+        self.td.cleanup()
+
+    def _request(self, method, path, body=None, json_body=True):
+        data = None
+        headers = {}
+        if body is not None:
+            data = json.dumps(body).encode() if not isinstance(body, (bytes, bytearray)) else body
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(self.base + path, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                raw = resp.read()
+                ctype = resp.headers.get("Content-Type", "")
+                parsed = json.loads(raw) if "json" in ctype else raw
+                return resp.status, parsed
+        except urllib.error.HTTPError as error:
+            raw = error.read()
+            try: parsed = json.loads(raw)
+            except json.JSONDecodeError: parsed = raw
+            return error.code, parsed
+
+    def test_web_ui_http_api(self):
+        status, body = self._request("GET", "/")
+        self.assertEqual(status, 200)
+        html = body.decode() if isinstance(body, bytes) else body
+        self.assertIn("APK Secret Scanner", html)
+
+        status, state = self._request("GET", "/api/state")
+        self.assertEqual(status, 200)
+        self.assertFalse(state["running"])
+        self.assertEqual(state["secret_counts"]["unchecked"], 0)
+
+        status, payload = self._request("GET", "/api/apps")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["apps"], [])
+        status, payload = self._request("GET", "/api/secrets")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["secrets"], [])
+        status, payload = self._request("GET", "/api/logs")
+        self.assertEqual(status, 200)
+        self.assertIn("logs", payload)
+
+        status, payload = self._request("GET", "/api/missing")
+        self.assertEqual(status, 404)
+
+        status, payload = self._request("POST", "/api/import", {"path": "/no/such/apk"})
+        self.assertEqual(status, 400)
+        self.assertIn("not found", payload["error"])
+
+        status, payload = self._request("POST", "/api/scan/start", b"{")
+        self.assertEqual(status, 400)
+
+        now = time.time()
+        db = sqlite3.connect(self.state / "state.sqlite3")
+        db.execute("INSERT INTO jobs(source,release_url,package,version,status,retries,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                   ("local", "local://web", "com.web", "1", "failed", 1, now, now))
+        db.execute("INSERT INTO secrets(job_id,detector,value,file,verified,working,created_at) VALUES(?,?,?,?,0,NULL,?)",
+                   (1, "Mystery", "zzz", "f", now))
+        db.commit(); db.close()
+
+        status, payload = self._request("GET", "/api/secrets")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["secrets"][0]["detector"], "Mystery")
+
+        status, payload = self._request("POST", "/api/mark", {"id": 1, "verdict": "working"})
+        self.assertEqual(status, 200)
+        status, payload = self._request("GET", "/api/secrets")
+        self.assertEqual(payload["secrets"][0]["working"], 1)
+
+        status, payload = self._request("POST", "/api/retry-failed", {})
+        self.assertEqual(status, 200)
+        status, payload = self._request("GET", "/api/apps")
+        self.assertEqual(payload["apps"][0]["status"], "queued")
+
+        status, payload = self._request("POST", "/api/scan/start", {
+            "sources": ["local"], "forever": True, "interval": 30, "verify": False, "workers": 1,
+        })
+        self.assertEqual(status, 200)
+        for _ in range(50):
+            _, state = self._request("GET", "/api/state")
+            if state["running"]: break
+            time.sleep(0.05)
+        self.assertTrue(state["running"])
+        status, payload = self._request("POST", "/api/scan/start", {"sources": ["local"]})
+        self.assertEqual(status, 409)
+        status, payload = self._request("POST", "/api/scan/stop", {})
+        self.assertEqual(status, 200)
+
+
 if __name__ == "__main__": unittest.main()
+
