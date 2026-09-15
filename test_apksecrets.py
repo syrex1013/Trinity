@@ -196,6 +196,49 @@ class ApkSecretsTests(unittest.TestCase):
         try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), True)
         finally: apksecrets._probe = restore
 
+    def test_google_key_service_blocked_on_gemini_alone_is_working(self):
+        # API_KEY_SERVICE_BLOCKED only happens after the key authenticated and
+        # resolved to a project: the Gemini denial itself proves the key is
+        # live, no Firebase/Maps cross-check needed (the fake raises on any
+        # further probe)
+        restore = self._fake_probe({
+            "generativelanguage": (403, json.dumps({"error": {
+                "code": 403, "status": "PERMISSION_DENIED",
+                "message": "Requests to this API generativelanguage.googleapis.com method google.ai.generativelanguage.v1beta.GenerativeService.GenerateContent are blocked.",
+                "details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                             "reason": "API_KEY_SERVICE_BLOCKED", "domain": "googleapis.com",
+                             "metadata": {"service": "generativelanguage.googleapis.com",
+                                          "consumer": "projects/318182098261"}}],
+            }}).encode()),
+        })
+        try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), True)
+        finally: apksecrets._probe = restore
+
+    def test_google_key_disabled_in_project_on_gemini_alone_is_working(self):
+        # the project-level "not been used" denial on Gemini alone proves the
+        # key is live, even when every other endpoint is unreachable
+        restore = self._fake_probe({
+            "generativelanguage": (403, json.dumps({"error": {
+                "code": 403, "status": "PERMISSION_DENIED",
+                "message": "Gemini API has not been used in project 318182098261 before or it is disabled. "
+                           "Enable it by visiting https://console.developers.google.com/apis/api/"
+                           "generativelanguage.googleapis.com/overview?project=318182098261 then retry.",
+            }}).encode()),
+        })
+        try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), True)
+        finally: apksecrets._probe = restore
+
+    def test_google_key_generic_403_still_needs_the_cross_check(self):
+        # a 403 without a project-naming message or ErrorInfo reason says
+        # nothing about the key: Firebase must decide
+        restore = self._fake_probe({
+            "generativelanguage": (403, b'{"error":{"code":403,"status":"PERMISSION_DENIED","message":"The caller does not have permission"}}'),
+            "identitytoolkit": (429, b"resource exhausted"),
+            "maps.googleapis": (200, b'{"status":"REQUEST_DENIED","error_message":"The provided API key is invalid."}'),
+        })
+        try: self.assertIs(apksecrets.verify_secret("GoogleGeminiAPIKey", "AIzaSyX"), False)
+        finally: apksecrets._probe = restore
+
     def test_google_key_denied_on_maps_for_project_reasons_is_working(self):
         restore = self._fake_probe({
             "generativelanguage": (400, b'{"error":{"reason":"API_KEY_INVALID"}}'),
